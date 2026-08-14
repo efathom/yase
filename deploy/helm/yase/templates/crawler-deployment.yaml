@@ -1,0 +1,44 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-crawler
+  labels:
+    app: yase
+    component: crawler
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: yase
+      component: crawler
+  template:
+    metadata:
+      labels:
+        app: yase
+        component: crawler
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "{{ .Values.metrics.port }}"
+    spec:
+      serviceAccountName: {{ include "yase.serviceAccountName" . }}
+      containers:
+        - name: crawler
+          image: "{{ .Values.image.repository }}/crawler:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args: ["-mode", "worker"]
+          env:
+            - name: YASE_SERVER_GRPC_HOST
+              value: "{{ .Release.Name }}-ingestion"
+            - name: YASE_SERVER_GRPC_PORT
+              value: "{{ .Values.ingestion.port }}"
+            - name: YASE_REDIS_ADDR
+              value: "{{ .Values.redis.addr }}"
+            - name: YASE_METRICS_ADDR
+              value: ":{{ .Values.metrics.port }}"
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi

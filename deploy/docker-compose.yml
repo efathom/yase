@@ -1,0 +1,192 @@
+services:
+  # State Management (Distributed Bloom Filters, Rate Limiting, Idempotency Locks)
+  redis:
+    image: redis/redis-stack-server:latest
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # Async Durability Buffer (Event-Driven Handoff)
+  kafka:
+    image: confluentinc/confluent-local:7.6.0
+    ports:
+      - "9092:9092"
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD-SHELL", "kafka-topics --bootstrap-server localhost:9092 --list || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  # TEI Embedding Sidecar (shared model, downloaded once into named volume)
+  # Serves OpenAI-compatible /v1/embeddings on port 8888 inside the network.
+  tei:
+    build:
+      context: ../
+      dockerfile: deploy/Dockerfile.tei
+    # For x86_64 hosts, replace 'build' with: image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.9
+    command: ["--model-id", "Alibaba-NLP/gte-modernbert-base", "--port", "8888"]
+    ports:
+      - "8888:8888"
+    volumes:
+      - tei-models:/data
+    environment:
+      - HUGGING_FACE_HUB_TOKEN=${HUGGING_FACE_HUB_TOKEN:-}
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8888/health || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 40
+      start_period: 120s
+
+  # TEI Reranker Sidecar (cross-encoder for Stage 5 reranking)
+  tei-reranker:
+    build:
+      context: ../
+      dockerfile: deploy/Dockerfile.tei
+    # For x86_64 hosts, replace 'build' with: image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.9
+    command: ["--model-id", "Alibaba-NLP/gte-reranker-modernbert-base", "--port", "8888"]
+    ports:
+      - "8081:8888"
+    volumes:
+      - tei-reranker-models:/data
+    environment:
+      - HUGGING_FACE_HUB_TOKEN=${HUGGING_FACE_HUB_TOKEN:-}
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8888/health || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 40
+      start_period: 120s
+
+  # Crawler Fleet (scales horizontally via replicas)
+  crawler:
+    build:
+      context: ../
+      dockerfile: deploy/Dockerfile.crawler
+    depends_on:
+      redis:
+        condition: service_healthy
+      ingestion:
+        condition: service_started
+    environment:
+      - YASE_REDIS_ADDR=redis:6379
+      - YASE_SERVER_GRPC_HOST=ingestion
+      - YASE_SERVER_GRPC_PORT=50051
+      - YASE_METRICS_ADDR=:9090
+
+  # gRPC Push-Based Ingestion Edge
+  ingestion:
+    build:
+      context: ../
+      dockerfile: deploy/Dockerfile.ingestion
+    depends_on:
+      kafka:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "50051:50051"
+    environment:
+      - YASE_REDIS_ADDR=redis:6379
+      - YASE_KAFKA_BROKERS=kafka:9092
+      - YASE_METRICS_ADDR=:9090
+
+  # Kafka Consumer → Semantic Chunking → Embedding → Hybrid Indexer + IndexService gRPC
+  indexer:
+    build:
+      context: ../
+      dockerfile: deploy/Dockerfile.indexer
+    depends_on:
+      kafka:
+        condition: service_healthy
+      tei:
+        condition: service_healthy
+    ports:
+      - "50052:50052"
+    environment:
+      - YASE_KAFKA_BROKERS=kafka:9092
+      - YASE_EMBEDDER_PROVIDER=tei
+      - YASE_EMBEDDER_MODEL=Alibaba-NLP/gte-modernbert-base
+      - YASE_EMBEDDER_DIMENSION=768
+      - YASE_EMBEDDER_BASE_URL=http://tei:8888
+      - YASE_INDEX_PATH=/data/yase/bluge
+      - YASE_INDEX_ARENA_SIZE_BYTES=4294967296
+      - YASE_INDEX_GRPC_PORT=50052
+      - YASE_METRICS_ADDR=:9090
+    volumes:
+      - index-data:/data/yase
+    security_opt:
+      - seccomp:unconfined  # Required for syscall.Mmap
+    cap_add:
+      - IPC_LOCK  # Prevents OS from paging mmap vectors to disk (mlock)
+
+  # Hybrid Search API Gateway (stateless HTTP→gRPC proxy)
+  gateway:
+    build:
+      context: ../
+      dockerfile: deploy/Dockerfile.gateway
+    depends_on:
+      - indexer
+      - tei
+    ports:
+      - "8000:8000"
+    environment:
+      - YASE_EMBEDDER_PROVIDER=tei
+      - YASE_EMBEDDER_MODEL=Alibaba-NLP/gte-modernbert-base
+      - YASE_EMBEDDER_DIMENSION=768
+      - YASE_EMBEDDER_BASE_URL=http://tei:8888
+      - YASE_INDEX_GRPC_HOST=indexer
+      - YASE_INDEX_GRPC_PORT=50052
+      - YASE_METRICS_ADDR=:9090
+
+  # Observability: Prometheus scrapes metrics from all services
+  prometheus:
+    image: prom/prometheus:latest
+    ports:
+      - "9091:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    depends_on:
+      - ingestion
+      - indexer
+      - gateway
+
+  # Observability: Grafana dashboards for search latency, crawl rate, queue depth
+  grafana:
+    image: grafana/grafana:latest
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-yase}
+      - GF_AUTH_ANONYMOUS_ENABLED=false
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+    depends_on:
+      - prometheus
+
+volumes:
+  redis-data:
+  kafka-data:
+  index-data:
+  tei-models:
+  tei-reranker-models:
+  prometheus-data:
+  grafana-data:

@@ -1,0 +1,51 @@
+{{- if .Values.teiReranker.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-tei-reranker
+  labels:
+    app: yase
+    component: tei-reranker
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: yase
+      component: tei-reranker
+  template:
+    metadata:
+      labels:
+        app: yase
+        component: tei-reranker
+    spec:
+      containers:
+        - name: tei-reranker
+          image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.9
+          args: ["--model-id", "{{ .Values.teiReranker.model }}", "--port", "8888"]
+          ports:
+            - containerPort: 8888
+              name: http
+          resources:
+            {{- toYaml .Values.teiReranker.resources | nindent 12 }}
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 15
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-tei-reranker
+spec:
+  type: ClusterIP
+  ports:
+    - port: {{ .Values.teiReranker.port }}
+      targetPort: http
+      protocol: TCP
+      name: http
+  selector:
+    app: yase
+    component: tei-reranker
+{{- end }}

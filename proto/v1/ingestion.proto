@@ -1,0 +1,44 @@
+syntax = "proto3";
+package yase.ingestion.v1;
+option go_package = "github.com/efathom/yase/proto/v1;ingestionv1";
+
+// CrawlRecord represents a single crawled document.
+// Uses bytes for raw_content instead of string to skip Go runtime UTF-8 validation
+// during unmarshaling, reducing allocation overhead.
+message CrawlRecord {
+  string url = 1;
+  bytes raw_content = 2;
+  map<string, string> metadata = 3;
+  int64 crawled_at_unix = 4;
+  string collection_id = 5; // target collection (empty = _default)
+}
+
+// BatchIngestRequest batches multiple records to reduce HTTP/2 framing overhead.
+message BatchIngestRequest {
+  repeated CrawlRecord records = 1;
+}
+
+message BatchIngestResponse {
+  int32 processed_count = 1;
+  string status = 2;
+}
+
+// StreamIngestRequest wraps a single record for bidirectional streaming.
+message StreamIngestRequest {
+  CrawlRecord record = 1;
+}
+
+message StreamIngestResponse {
+  string url = 1;
+  string status = 2;
+}
+
+// IngestionService provides both batch and streaming ingestion endpoints.
+service IngestionService {
+  // IngestBatch processes bulk, latency-tolerant historical data.
+  rpc IngestBatch(BatchIngestRequest) returns (BatchIngestResponse);
+
+  // IngestStream handles sub-second, real-time bidirectional streaming
+  // from crawler nodes.
+  rpc IngestStream(stream StreamIngestRequest) returns (stream StreamIngestResponse);
+}

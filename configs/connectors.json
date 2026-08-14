@@ -1,0 +1,76 @@
+{
+  "connectors": [
+    {
+      "id": "confluence-engineering",
+      "type": "confluence",
+      "schedule": "*/15 * * * *",
+      "sync_mode": "incremental",
+      "streams": ["pages"],
+      "auth": {
+        "method": "basic",
+        "username": "user@company.com",
+        "password": "YOUR_API_TOKEN"
+      },
+      "config": {
+        "base_url": "https://company.atlassian.net/wiki",
+        "space_keys": ["ENG", "ARCH"],
+        "page_size": 50
+      }
+    },
+    {
+      "id": "jira-bugs",
+      "type": "jira",
+      "schedule": "*/10 * * * *",
+      "sync_mode": "incremental",
+      "streams": ["issues"],
+      "auth": {
+        "method": "basic",
+        "username": "user@company.com",
+        "password": "YOUR_API_TOKEN"
+      },
+      "config": {
+        "base_url": "https://company.atlassian.net",
+        "project_keys": ["BUG", "INCIDENT"],
+        "page_size": 50
+      }
+    },
+    {
+      "id": "s3-docs",
+      "type": "s3",
+      "schedule": "0 * * * *",
+      "sync_mode": "incremental",
+      "streams": ["files"],
+      "auth": {
+        "method": "api_key",
+        "api_key": "YOUR_AWS_ACCESS_KEY"
+      },
+      "config": {
+        "bucket": "company-docs",
+        "prefix": "engineering/",
+        "region": "us-west-2",
+        "secret_key": "YOUR_AWS_SECRET_KEY",
+        "file_extensions": [".md", ".pdf", ".docx", ".html"]
+      }
+    },
+    {
+      "id": "postgres-wiki",
+      "type": "postgres",
+      "schedule": "*/5 * * * *",
+      "sync_mode": "incremental",
+      "streams": ["articles"],
+      "auth": {
+        "method": "basic",
+        "username": "readonly_user",
+        "password": "YOUR_DB_PASSWORD"
+      },
+      "config": {
+        "connection_string": "postgres://localhost:5432/wiki?sslmode=disable",
+        "tables": ["articles"],
+        "content_columns": ["title", "body"],
+        "id_column": "id",
+        "timestamp_column": "updated_at",
+        "url_template": "https://wiki.internal/articles/{id}"
+      }
+    }
+  ]
+}

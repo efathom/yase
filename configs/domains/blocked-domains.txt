@@ -1,0 +1,22 @@
+# YASE Crawler — Blocked Domains (Blacklist)
+# These domains are ALWAYS rejected, even if they appear in the whitelist.
+# Use this for ad networks, trackers, and known low-quality sources.
+
+# ── Ad networks ──
+ads.google.com
+doubleclick.net
+googlesyndication.com
+adservice.google.com
+
+# ── Trackers ──
+analytics.google.com
+pixel.facebook.com
+bat.bing.com
+
+# ── Social media (high noise, low signal) ──
+# twitter.com
+# facebook.com
+# instagram.com
+
+# ── Known spam ──
+# spam.example.com

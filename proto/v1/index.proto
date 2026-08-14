@@ -1,0 +1,77 @@
+syntax = "proto3";
+package yase.ingestion.v1;
+option go_package = "github.com/efathom/yase/proto/v1;ingestionv1";
+
+// IndexService owns the hybrid engine and exposes ingest + search RPCs.
+// The indexer process hosts this service; the gateway calls it remotely.
+service IndexService {
+  // Ingest adds a document to the hybrid index (Bluge + HNSW-IF).
+  rpc Ingest(IngestRequest) returns (IngestResponse);
+
+  // Search executes a hybrid BM25 + semantic search with RRF fusion.
+  rpc Search(SearchRequest) returns (SearchResponse);
+
+  // Stats returns index health information.
+  rpc Stats(StatsRequest) returns (StatsResponse);
+}
+
+message IngestRequest {
+  uint32 doc_id = 1;
+  string text = 2;
+  repeated float vector = 3;
+  map<string, string> metadata = 4;
+  string collection_id = 5; // target collection (empty = _default)
+}
+
+message IngestResponse {
+  bool ok = 1;
+}
+
+message SearchRequest {
+  string query = 1;
+  repeated float query_vector = 2;
+  map<string, string> filters = 3;
+  int32 top_k = 4;
+  string collection_id = 5; // target collection (empty = _default)
+}
+
+message ScoredResult {
+  uint32 id = 1;
+  double fused_score = 2;
+  double bm25_score = 3;
+  float semantic_score = 4;
+  string collection_id = 5; // which collection this result came from
+}
+
+message SearchResponse {
+  repeated ScoredResult results = 1;
+}
+
+message StatsRequest {}
+
+message StatsResponse {
+  int64 hnsw_nodes = 1;
+  int64 arena_used_bytes = 2;
+  int64 centroids = 3;
+  int64 leaves = 4;
+}
+
+// ShardSearchService is hosted by each cluster node. The distributed gateway
+// calls SearchShard on the nodes that own the target shards.
+service ShardSearchService {
+  rpc SearchShard(ShardSearchRequest) returns (ShardSearchResponse);
+}
+
+message ShardSearchRequest {
+  uint32 shard_id = 1;
+  string query = 2;
+  repeated float query_vector = 3;
+  map<string, string> filters = 4;
+  int32 top_k = 5;
+  string collection_id = 6; // target collection
+}
+
+message ShardSearchResponse {
+  repeated ScoredResult results = 1;
+  uint32 shard_id = 2;
+}

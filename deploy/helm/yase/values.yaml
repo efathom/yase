@@ -1,0 +1,106 @@
+replicaCount:
+  gateway: 2
+  indexer: 1
+  ingestion: 1
+
+image:
+  repository: ghcr.io/efathom/yase
+  tag: latest
+  pullPolicy: IfNotPresent
+
+gateway:
+  port: 8000
+  resources:
+    requests:
+      cpu: 500m
+      memory: 512Mi
+    limits:
+      cpu: 2000m
+      memory: 2Gi
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 10
+    targetCPUUtilization: 70
+
+indexer:
+  port: 50052
+  arenaSize: "4Gi"
+  persistence:
+    enabled: true
+    size: 50Gi
+    storageClass: ""
+  resources:
+    requests:
+      cpu: 1000m
+      memory: 4Gi
+    limits:
+      cpu: 4000m
+      memory: 8Gi
+
+ingestion:
+  port: 50051
+  resources:
+    requests:
+      cpu: 500m
+      memory: 256Mi
+    limits:
+      cpu: 1000m
+      memory: 512Mi
+
+tei:
+  enabled: true
+  model: "Alibaba-NLP/gte-modernbert-base"
+  port: 8888
+  resources:
+    requests:
+      cpu: 2000m
+      memory: 2Gi
+    limits:
+      cpu: 4000m
+      memory: 4Gi
+
+teiReranker:
+  enabled: false
+  model: "Alibaba-NLP/gte-reranker-modernbert-base"
+  port: 8081
+  resources:
+    requests:
+      cpu: 2000m
+      memory: 2Gi
+
+embedder:
+  provider: tei
+  dimension: 768
+
+collections:
+  basePath: /data/yase/collections
+  defaultArena: "1Gi"
+  maxCollections: 100
+
+auth:
+  enabled: false
+  method: api_key
+
+kafka:
+  brokers:
+    - kafka:9092
+  topic: crawl-records
+
+redis:
+  addr: redis:6379
+
+metrics:
+  enabled: true
+  port: 9090
+
+serviceAccount:
+  create: true
+  name: ""
+
+secrets:
+  embedderApiKey: ""
+  jwtSecret: ""
+
+networkPolicy:
+  enabled: false

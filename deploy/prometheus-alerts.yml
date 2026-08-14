@@ -1,0 +1,84 @@
+groups:
+  - name: yase-alerts
+    rules:
+      - alert: HighSearchLatencyP99
+        expr: histogram_quantile(0.99, rate(yase_search_latency_seconds_bucket[5m])) > 0.5
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Search P99 latency above 500ms"
+          description: "P99 search latency has been above 500ms for 5 minutes."
+
+      - alert: HighSearchLatencyP99Critical
+        expr: histogram_quantile(0.99, rate(yase_search_latency_seconds_bucket[5m])) > 2
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Search P99 latency above 2s"
+
+      - alert: HighSearchErrorRate
+        expr: rate(yase_search_errors_total[5m]) / rate(yase_search_latency_seconds_count[5m]) > 0.05
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Search error rate above 5%"
+
+      - alert: ArenaAlmostFull
+        expr: yase_arena_usage_bytes / yase_arena_capacity_bytes > 0.9
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Arena memory usage above 90%"
+          description: "The off-heap vector arena is nearly full. Consider increasing arena_size_bytes or adding shards."
+
+      - alert: ArenaFull
+        expr: yase_arena_usage_bytes / yase_arena_capacity_bytes > 0.98
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Arena memory critically full (>98%)"
+
+      - alert: KafkaConsumerLagHigh
+        expr: yase_kafka_consumer_lag > 10000
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Kafka consumer lag above 10k messages"
+
+      - alert: EmbedderUnreachable
+        expr: rate(yase_search_errors_total{error_type="embedder"}[5m]) > 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Embedder service is failing"
+
+      - alert: ConnectorSyncFailing
+        expr: yase_connector_sync_status == 2
+        for: 30m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Connector sync has been failing for 30 minutes"
+
+      - alert: RaftLeaderFlapping
+        expr: changes(yase_raft_leader_changes_total[10m]) > 3
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Raft leader changing frequently"
+
+      - alert: HighIngestErrorRate
+        expr: rate(yase_ingest_errors_total[5m]) > 0.1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Ingestion error rate above 10%"

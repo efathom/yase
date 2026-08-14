@@ -1,0 +1,20 @@
+FROM rust:1.87-bookworm AS builder
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    cmake pkg-config libssl-dev protobuf-compiler && \
+    rm -rf /var/lib/apt/lists/*
+
+WORKDIR /build
+RUN git clone --depth 1 https://github.com/huggingface/text-embeddings-inference.git .
+RUN cargo build --release
+
+FROM debian:bookworm-slim
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates curl libssl3 && \
+    rm -rf /var/lib/apt/lists/*
+
+COPY --from=builder /build/target/release/text-embeddings-router /usr/local/bin/
+ENV HF_HOME=/data
+
+ENTRYPOINT ["text-embeddings-router"]

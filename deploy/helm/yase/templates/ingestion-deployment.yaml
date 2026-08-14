@@ -1,0 +1,65 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-ingestion
+  labels:
+    app: yase
+    component: ingestion
+spec:
+  replicas: {{ .Values.replicaCount.ingestion }}
+  selector:
+    matchLabels:
+      app: yase
+      component: ingestion
+  template:
+    metadata:
+      labels:
+        app: yase
+        component: ingestion
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "{{ .Values.metrics.port }}"
+    spec:
+      serviceAccountName: {{ include "yase.serviceAccountName" . }}
+      containers:
+        - name: ingestion
+          image: "{{ .Values.image.repository }}/ingestion:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - containerPort: {{ .Values.ingestion.port }}
+              name: grpc
+            - containerPort: {{ .Values.metrics.port }}
+              name: metrics
+          env:
+            - name: YASE_SERVER_GRPC_PORT
+              value: "{{ .Values.ingestion.port }}"
+            - name: YASE_KAFKA_BROKERS
+              value: "{{ join "," .Values.kafka.brokers }}"
+            - name: YASE_KAFKA_TOPIC
+              value: "{{ .Values.kafka.topic }}"
+            - name: YASE_REDIS_ADDR
+              value: "{{ .Values.redis.addr }}"
+            - name: YASE_METRICS_ADDR
+              value: ":{{ .Values.metrics.port }}"
+          resources:
+            {{- toYaml .Values.ingestion.resources | nindent 12 }}
+          readinessProbe:
+            tcpSocket:
+              port: grpc
+            initialDelaySeconds: 5
+            periodSeconds: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-ingestion
+spec:
+  type: ClusterIP
+  ports:
+    - port: {{ .Values.ingestion.port }}
+      targetPort: grpc
+      protocol: TCP
+      name: grpc
+  selector:
+    app: yase
+    component: ingestion

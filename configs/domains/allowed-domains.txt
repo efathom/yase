@@ -1,0 +1,27 @@
+# YASE Crawler — Allowed Domains (Whitelist)
+# One domain per line. Empty lines and # comments are ignored.
+# The crawler will ONLY visit these domains. All others are rejected.
+# To allow all domains, leave this file empty or remove the config reference.
+
+# ── Go ecosystem ──
+go.dev
+#pkg.go.dev
+#golang.org
+#blog.golang.org
+#tip.golang.org
+
+# ── Documentation & reference ──
+#en.wikipedia.org
+#docs.github.com
+#developer.mozilla.org
+
+# ── Tech blogs ──
+#research.google
+#arxiv.org
+#engineering.fb.com
+
+# ── Internal (uncomment for your org) ──
+# wiki.internal.company.com
+# docs.internal.company.com
+# confluence.company.com
+# jira.company.com

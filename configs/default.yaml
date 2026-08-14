@@ -1,0 +1,150 @@
+server:
+  grpc_port: 50051
+  http_port: 8000
+  max_recv_msg_size: 16777216  # 16MB
+  shutdown_grace: 15s
+
+kafka:
+  brokers:
+    - localhost:9092
+  topic: crawl-records
+  group_id: yase-indexer
+  partitions: 6
+  replication_factor: 1  # set >= 3 for production durability
+  batch_size: 500
+  batch_timeout: 10ms
+  required_acks: -1  # all ISR replicas
+
+redis:
+  addr: localhost:6379
+  password: ""
+  db: 0
+  pool_size: 2000
+
+hnsw:
+  m: 16
+  mmax0: 32
+  ef_construction: 200
+  ef_search: 50
+
+index:
+  path: /data/yase/bluge
+  arena_size_bytes: 4294967296  # 4GB
+  centroid_rate: 5              # 20% of docs become centroids
+  grpc_port: 50052              # IndexService gRPC port
+
+crawler:
+  max_workers: 2000
+  request_timeout: 15s
+  rate_per_domain: 1
+  rate_window: 1s
+  heartbeat_interval: 3s
+  reaper_interval: 4s
+  reaper_timeout: 9s
+  max_retries: 3
+  max_pages: 0          # 0 = unlimited
+  dns_ttl: 5m
+  # Domain filtering: inline lists + optional file-based lists (merged)
+  # allowed_domains: []              # inline whitelist (empty = allow all)
+  # blocked_domains: []              # inline blacklist
+  allowed_domains_file: configs/domains/allowed-domains.txt
+  blocked_domains_file: configs/domains/blocked-domains.txt
+
+metrics:
+  addr: ":9090"
+
+embedder:
+  provider: tei
+  model: Alibaba-NLP/gte-modernbert-base  # MTEB 64.38, 768d
+  base_url: http://localhost:8888
+  dimension: 768
+  timeout: 30s
+  cache_size: 100000
+  # To use Ollama instead:
+  # provider: ollama
+  # model: nomic-embed-text    # or: mxbai-embed-large (1024d), all-minilm (384d)
+  # dimension: 768
+  # base_url: http://localhost:11434
+  #
+  # To use OpenAI API:
+  # provider: openai
+  # model: text-embedding-3-small
+  # dimension: 1536
+  # base_url: https://api.openai.com/v1
+  # api_key: sk-...
+
+collections:
+  base_path: /data/yase/collections
+  default_arena: 1073741824    # 1GB per collection
+  max_collections: 100
+  default_collection: _default
+
+reranker:
+  enabled: false  # set true to enable cross-encoder reranking (Stage 5)
+  provider: tei
+  model: Alibaba-NLP/gte-reranker-modernbert-base
+  base_url: http://localhost:8081
+  timeout: 2s
+  candidates: 50  # RRF candidates to feed to reranker before final top_k
+
+auth:
+  enabled: false  # set true to enable API authentication
+  method: api_key  # "api_key" | "jwt" | "none"
+  # api_keys:
+  #   - key: "your-api-key"
+  #     tenant_id: "your-tenant"
+  #     user_id: "user-1"
+  #     roles: ["admin"]
+  # jwt:
+  #   secret: "change-me"
+  #   issuer: "yase"
+  #   audience: "yase"
+  #   tenant_claim: "tenant_id"
+  #   roles_claim: "roles"
+
+tls:
+  enabled: false
+  # cert_path: /etc/yase/tls/server.crt
+  # key_path: /etc/yase/tls/server.key
+  # ca_path: /etc/yase/tls/ca.crt
+  # client_auth: false  # set true for mTLS
+
+rate_limit:
+  enabled: false
+  default_search_qps: 100
+  default_ingest_rps: 50
+
+connectors:
+  enabled: false
+  config_path: configs/connectors.json
+  state_backend: file  # "file" | "redis"
+  state_file_path: /tmp/yase-connector-state
+  http_port: 9300      # management API (binds to 127.0.0.1)
+
+cluster:
+  node_id: node-0
+  raft_addr: localhost:7000
+  raft_dir: /data/yase/raft
+  bootstrap: false
+  join_addr: ""        # leader HTTP address to join (e.g. http://localhost:9100)
+  shard_port: 50053    # gRPC port for ShardSearchService
+
+audit:
+  enabled: false
+  output: stderr  # "stdout", "stderr", or file path
+
+logging:
+  format: json   # "json" or "text"
+  level: info    # "debug", "info", "warn", "error"
+  output: stderr # "stderr", "stdout", or file path
+
+tracing:
+  enabled: false
+  exporter: stdout  # "stdout" or "otlp"
+  endpoint: localhost:4318  # OTLP collector endpoint (when exporter: otlp)
+  sample_rate: 0.1
+
+cache:
+  enabled: true
+  ttl: 5m
+  max_size: 10000

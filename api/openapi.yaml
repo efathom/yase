@@ -1,0 +1,553 @@
+openapi: 3.1.0
+info:
+  title: YASE Search API
+  description: Yet Another Search Engine — Hybrid BM25 + Vector Search with RAG
+  version: 1.0.0
+  license:
+    name: Apache 2.0
+
+servers:
+  - url: http://localhost:8000
+    description: Local development
+
+security:
+  - ApiKeyAuth: []
+  - BearerAuth: []
+
+paths:
+  /search:
+    post:
+      summary: Hybrid search
+      description: Execute a hybrid BM25 + semantic vector search with RRF fusion and optional cross-encoder reranking.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SearchRequest'
+      responses:
+        '200':
+          description: Search results
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchResponse'
+        '400':
+          description: Invalid request
+        '401':
+          description: Unauthorized
+        '429':
+          description: Rate limit exceeded
+
+  /v1/rag:
+    post:
+      summary: RAG (Retrieval-Augmented Generation)
+      description: Search with citation enrichment for LLM agent consumption.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RAGRequest'
+      responses:
+        '200':
+          description: RAG response with citations
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RAGResponse'
+
+  /v1/documents:
+    delete:
+      summary: Delete documents by ID
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [doc_ids]
+              properties:
+                doc_ids:
+                  type: array
+                  items:
+                    type: integer
+                    format: uint32
+      responses:
+        '200':
+          description: Deletion result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeleteResponse'
+
+  /v1/documents/query:
+    delete:
+      summary: Delete documents by metadata filter
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [filters]
+              properties:
+                filters:
+                  type: object
+                  additionalProperties:
+                    type: string
+      responses:
+        '200':
+          description: Deletion result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeleteResponse'
+
+  /v1/collections:
+    post:
+      summary: Create a collection
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateCollectionRequest'
+      responses:
+        '201':
+          description: Collection created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Collection'
+        '409':
+          description: Collection already exists
+    get:
+      summary: List collections
+      parameters:
+        - name: tenant_id
+          in: query
+          schema:
+            type: string
+          description: Filter by tenant ID
+      responses:
+        '200':
+          description: List of collections
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Collection'
+
+  /v1/collections/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+    get:
+      summary: Get collection details
+      responses:
+        '200':
+          description: Collection details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Collection'
+        '404':
+          description: Collection not found
+    put:
+      summary: Update collection
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateCollectionRequest'
+      responses:
+        '200':
+          description: Collection updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Collection'
+    delete:
+      summary: Delete collection
+      description: Cascading delete — closes engine, removes data. The _default collection cannot be deleted.
+      responses:
+        '200':
+          description: Collection deleted
+        '403':
+          description: Cannot delete _default collection
+        '404':
+          description: Collection not found
+
+  /v1/collections/{id}/search:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+    post:
+      summary: Search within a single collection
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SearchRequest'
+      responses:
+        '200':
+          description: Search results
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchResponse'
+
+  /v1/collections/search:
+    post:
+      summary: Cross-collection search
+      description: Fan-out search across multiple collections with RRF merge. Empty collections list searches all.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CrossCollectionSearchRequest'
+      responses:
+        '200':
+          description: Merged search results
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchResponse'
+
+  /v1/collections/{id}/connectors:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+    post:
+      summary: Bind a connector to a collection
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [connector_job_id]
+              properties:
+                connector_job_id:
+                  type: string
+      responses:
+        '200':
+          description: Connector bound
+
+  /v1/collections/{id}/connectors/{connectorId}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: connectorId
+        in: path
+        required: true
+        schema:
+          type: string
+    delete:
+      summary: Unbind a connector from a collection
+      responses:
+        '200':
+          description: Connector unbound
+
+  /v1/collections/{id}/stats:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+    get:
+      summary: Get collection statistics
+      responses:
+        '200':
+          description: Collection stats
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CollectionStats'
+
+  /health:
+    get:
+      summary: Health check
+      security: []
+      responses:
+        '200':
+          description: Service is alive
+
+  /ready:
+    get:
+      summary: Readiness check
+      security: []
+      responses:
+        '200':
+          description: Service is ready to serve
+        '503':
+          description: Service is not ready
+
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+    BearerAuth:
+      type: http
+      scheme: bearer
+
+  schemas:
+    SearchRequest:
+      type: object
+      required: [query]
+      properties:
+        query:
+          type: string
+          description: Search query text
+        filters:
+          type: object
+          additionalProperties:
+            type: string
+          description: Metadata filters (exact match)
+        top_k:
+          type: integer
+          default: 10
+          description: Maximum results to return
+        page_size:
+          type: integer
+          description: Results per page (for pagination)
+        offset:
+          type: integer
+          default: 0
+          description: Pagination offset
+
+    SearchResponse:
+      type: object
+      properties:
+        status:
+          type: string
+        count:
+          type: integer
+          description: Number of results in this page
+        total:
+          type: integer
+          description: Total matching results
+        offset:
+          type: integer
+        duration_ms:
+          type: integer
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/SearchResult'
+
+    SearchResult:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: uint32
+        text:
+          type: string
+        collection_id:
+          type: string
+          description: Collection the result came from (set in collection search endpoints)
+        fused_score:
+          type: number
+          format: double
+        bm25_score:
+          type: number
+          format: double
+        semantic_score:
+          type: number
+          format: float
+        metadata:
+          type: object
+          additionalProperties:
+            type: string
+
+    CrossCollectionSearchRequest:
+      type: object
+      required: [query]
+      properties:
+        query:
+          type: string
+        collections:
+          type: array
+          items:
+            type: string
+          description: Collection IDs to search (empty = all)
+        filters:
+          type: object
+          additionalProperties:
+            type: string
+        top_k:
+          type: integer
+          default: 10
+        page_size:
+          type: integer
+        offset:
+          type: integer
+          default: 0
+
+    CreateCollectionRequest:
+      type: object
+      required: [id, name]
+      properties:
+        id:
+          type: string
+          description: Unique collection identifier (URL-safe slug)
+        name:
+          type: string
+          description: Human-friendly display name
+        tenant_id:
+          type: string
+        description:
+          type: string
+        config:
+          $ref: '#/components/schemas/CollectionConfig'
+
+    UpdateCollectionRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+
+    Collection:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        tenant_id:
+          type: string
+        description:
+          type: string
+        config:
+          $ref: '#/components/schemas/CollectionConfig'
+        status:
+          type: string
+          enum: [creating, ready, deleting]
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        connectors:
+          type: array
+          items:
+            type: string
+        shard_ids:
+          type: array
+          items:
+            type: integer
+            format: uint32
+
+    CollectionConfig:
+      type: object
+      properties:
+        arena_size_bytes:
+          type: integer
+          format: uint64
+        vec_dim:
+          type: integer
+        centroid_rate:
+          type: integer
+        sync_schedule:
+          type: string
+
+    CollectionStats:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        status:
+          type: string
+        hnsw_nodes:
+          type: integer
+        connectors:
+          type: integer
+
+    RAGRequest:
+      type: object
+      required: [query]
+      properties:
+        query:
+          type: string
+        filters:
+          type: object
+          additionalProperties:
+            type: string
+        top_k:
+          type: integer
+          default: 5
+        include_text:
+          type: boolean
+          default: true
+
+    RAGResponse:
+      type: object
+      properties:
+        status:
+          type: string
+        query:
+          type: string
+        citations:
+          type: array
+          items:
+            $ref: '#/components/schemas/Citation'
+        context:
+          type: string
+          description: Concatenated passage text with [N] source markers
+        duration_ms:
+          type: integer
+
+    Citation:
+      type: object
+      properties:
+        doc_id:
+          type: integer
+          format: uint32
+        chunk_text:
+          type: string
+        source_url:
+          type: string
+        relevance_score:
+          type: number
+        bm25_score:
+          type: number
+        semantic_score:
+          type: number
+        metadata:
+          type: object
+          additionalProperties:
+            type: string
+
+    DeleteResponse:
+      type: object
+      properties:
+        status:
+          type: string
+        deleted_count:
+          type: integer

@@ -1,0 +1,51 @@
+{{- if .Values.tei.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-tei
+  labels:
+    app: yase
+    component: tei
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: yase
+      component: tei
+  template:
+    metadata:
+      labels:
+        app: yase
+        component: tei
+    spec:
+      containers:
+        - name: tei
+          image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.9
+          args: ["--model-id", "{{ .Values.tei.model }}", "--port", "{{ .Values.tei.port }}"]
+          ports:
+            - containerPort: {{ .Values.tei.port }}
+              name: http
+          resources:
+            {{- toYaml .Values.tei.resources | nindent 12 }}
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 15
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-tei
+spec:
+  type: ClusterIP
+  ports:
+    - port: {{ .Values.tei.port }}
+      targetPort: http
+      protocol: TCP
+      name: http
+  selector:
+    app: yase
+    component: tei
+{{- end }}

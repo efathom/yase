@@ -1,0 +1,93 @@
+syntax = "proto3";
+package yase.ingestion.v1;
+option go_package = "github.com/efathom/yase/proto/v1;ingestionv1";
+
+import "google/protobuf/timestamp.proto";
+
+// CollectionService provides CRUD and search for collections.
+service CollectionService {
+  rpc CreateCollection(CreateCollectionRequest) returns (CollectionResponse);
+  rpc GetCollection(GetCollectionRequest) returns (CollectionResponse);
+  rpc ListCollections(ListCollectionsRequest) returns (ListCollectionsResponse);
+  rpc UpdateCollection(UpdateCollectionRequest) returns (CollectionResponse);
+  rpc DeleteCollection(DeleteCollectionRequest) returns (DeleteCollectionResponse);
+  rpc SearchCollection(CollectionSearchRequest) returns (CollectionSearchResponse);
+}
+
+message CollectionConfig {
+  uint64 arena_size_bytes = 1;
+  int32 vec_dim = 2;
+  int32 centroid_rate = 3;
+  string sync_schedule = 4;
+}
+
+message Collection {
+  string id = 1;
+  string name = 2;
+  string tenant_id = 3;
+  string description = 4;
+  CollectionConfig config = 5;
+  string status = 6;
+  google.protobuf.Timestamp created_at = 7;
+  google.protobuf.Timestamp updated_at = 8;
+  repeated string connectors = 9;
+  repeated uint32 shard_ids = 10;
+}
+
+message CreateCollectionRequest {
+  string id = 1;
+  string name = 2;
+  string tenant_id = 3;
+  string description = 4;
+  CollectionConfig config = 5;
+}
+
+message GetCollectionRequest {
+  string id = 1;
+}
+
+message ListCollectionsRequest {
+  string tenant_id = 1;
+}
+
+message ListCollectionsResponse {
+  repeated Collection collections = 1;
+}
+
+message UpdateCollectionRequest {
+  string id = 1;
+  string name = 2;
+  string description = 3;
+}
+
+message DeleteCollectionRequest {
+  string id = 1;
+}
+
+message DeleteCollectionResponse {
+  bool ok = 1;
+}
+
+message CollectionResponse {
+  Collection collection = 1;
+}
+
+message CollectionSearchRequest {
+  repeated string collection_ids = 1; // empty = all collections
+  string query = 2;
+  repeated float query_vector = 3;
+  map<string, string> filters = 4;
+  int32 top_k = 5;
+}
+
+message CollectionSearchResponse {
+  repeated CollectionScoredResult results = 1;
+}
+
+message CollectionScoredResult {
+  uint32 id = 1;
+  double fused_score = 2;
+  double bm25_score = 3;
+  float semantic_score = 4;
+  string collection_id = 5;
+}

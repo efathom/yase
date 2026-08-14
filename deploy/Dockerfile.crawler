@@ -1,0 +1,18 @@
+FROM golang:1.26-alpine AS builder
+
+RUN apk add --no-cache git gcc musl-dev
+
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+
+COPY . .
+# CGO_ENABLED=1 required for go-tree-sitter (AST-aware chunking)
+RUN CGO_ENABLED=1 go build -ldflags="-s -w" -o /bin/crawler ./cmd/crawler
+
+FROM alpine:3.21
+RUN apk add --no-cache ca-certificates
+COPY --from=builder /bin/crawler /usr/local/bin/crawler
+COPY configs/default.yaml /etc/yase/config.yaml
+
+ENTRYPOINT ["crawler", "-config", "/etc/yase/config.yaml"]
