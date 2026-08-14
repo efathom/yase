@@ -95,14 +95,14 @@ func OpenFileArena(path string) (*FileArena, error) {
 	// Validate header
 	magic := binary.LittleEndian.Uint32(data[0:4])
 	if magic != fileArenaMagic {
-		syscall.Munmap(data)
+		_ = syscall.Munmap(data)
 		syscall.Close(fd)
 		return nil, fmt.Errorf("invalid arena magic: %x (expected %x)", magic, fileArenaMagic)
 	}
 
 	savedOffset := binary.LittleEndian.Uint64(data[8:16])
 	if savedOffset < fileArenaHeaderSize || savedOffset > totalSize {
-		syscall.Munmap(data)
+		_ = syscall.Munmap(data)
 		syscall.Close(fd)
 		return nil, fmt.Errorf("invalid saved offset: %d (size=%d)", savedOffset, totalSize)
 	}

@@ -90,7 +90,7 @@ func (w *WasmEngine) ExecuteHooks(ctx context.Context, event HookEvent, chunkTex
 		// 2. Write Go string into WASM linear memory
 		if !mod.Memory().Write(uint32(ptr), textBytes) {
 			if free != nil {
-				free.Call(ctx, ptr)
+				_, _ = free.Call(ctx, ptr)
 			}
 			return "", fmt.Errorf("failed to write to WASM memory space")
 		}
@@ -99,7 +99,7 @@ func (w *WasmEngine) ExecuteHooks(ctx context.Context, event HookEvent, chunkTex
 		res, err := extractFn.Call(ctx, ptr, textLen)
 		if err != nil {
 			if free != nil {
-				free.Call(ctx, ptr)
+				_, _ = free.Call(ctx, ptr)
 			}
 			return "", fmt.Errorf("wasm extract_metadata: %w", err)
 		}
@@ -117,9 +117,9 @@ func (w *WasmEngine) ExecuteHooks(ctx context.Context, event HookEvent, chunkTex
 
 		// 5. Free allocations to prevent sandbox OOM
 		if free != nil {
-			free.Call(ctx, ptr)
+			_, _ = free.Call(ctx, ptr)
 			if uint32(ptr) != newPtr {
-				free.Call(ctx, uint64(newPtr))
+				_, _ = free.Call(ctx, uint64(newPtr))
 			}
 		}
 	}

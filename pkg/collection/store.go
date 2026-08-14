@@ -99,18 +99,18 @@ func (fs *FileStore) writeJSON(path string, v interface{}) error {
 	}
 	if _, err := f.Write(data); err != nil {
 		f.Close()
-		os.Remove(tmp)
+		_ = os.Remove(tmp)
 		return err
 	}
 	if err := f.Sync(); err != nil {
 		f.Close()
-		os.Remove(tmp)
+		_ = os.Remove(tmp)
 		return err
 	}
 	f.Close()
 
 	if err := os.Rename(tmp, path); err != nil {
-		os.Remove(tmp)
+		_ = os.Remove(tmp)
 		return err
 	}
 

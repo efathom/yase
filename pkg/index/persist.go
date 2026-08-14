@@ -314,19 +314,19 @@ func writeAtomicFile(path string, writeFn func(w io.Writer) error) error {
 
 	if err := writeFn(f); err != nil {
 		f.Close()
-		os.Remove(tmpPath)
+		_ = os.Remove(tmpPath)
 		return err
 	}
 
 	if err := f.Sync(); err != nil {
 		f.Close()
-		os.Remove(tmpPath)
+		_ = os.Remove(tmpPath)
 		return err
 	}
 	f.Close()
 
 	if err := os.Rename(tmpPath, path); err != nil {
-		os.Remove(tmpPath)
+		_ = os.Remove(tmpPath)
 		return err
 	}
 

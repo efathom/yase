@@ -1,3 +1,5 @@
+// Package broker provides Kafka producers, consumers, and topic management for
+// the ingestion pipeline.
 package broker
 
 import (

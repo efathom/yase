@@ -76,7 +76,7 @@ func (c *Connector) Validate(ctx context.Context) error {
 		return err
 	}
 	var resp slackResponse
-	json.Unmarshal(body, &resp)
+	_ = json.Unmarshal(body, &resp)
 	if !resp.OK {
 		return fmt.Errorf("slack auth.test: %s", resp.Error)
 	}
@@ -153,7 +153,7 @@ func (c *Connector) listPublicChannels(ctx context.Context) ([]string, error) {
 				NextCursor string `json:"next_cursor"`
 			} `json:"response_metadata"`
 		}
-		json.Unmarshal(body, &resp)
+		_ = json.Unmarshal(body, &resp)
 		if !resp.OK {
 			return nil, fmt.Errorf("conversations.list: %s", resp.Error)
 		}
@@ -180,7 +180,7 @@ func (c *Connector) readChannelHistory(ctx context.Context, channelID string, st
 			var cursorState struct {
 				Latest string `json:"latest"`
 			}
-			json.Unmarshal(raw, &cursorState)
+			_ = json.Unmarshal(raw, &cursorState)
 			oldest = cursorState.Latest
 		}
 	}
@@ -210,7 +210,7 @@ func (c *Connector) readChannelHistory(ctx context.Context, channelID string, st
 				NextCursor string `json:"next_cursor"`
 			} `json:"response_metadata"`
 		}
-		json.Unmarshal(body, &resp)
+		_ = json.Unmarshal(body, &resp)
 		if !resp.OK {
 			errs <- fmt.Errorf("conversations.history %s: %s", channelID, resp.Error)
 			return
@@ -296,7 +296,7 @@ func (c *Connector) fetchThreadReplies(ctx context.Context, channelID, threadTS 
 		slackResponse
 		Messages []slackMessage `json:"messages"`
 	}
-	json.Unmarshal(body, &resp)
+	_ = json.Unmarshal(body, &resp)
 	if !resp.OK {
 		return nil, fmt.Errorf("conversations.replies: %s", resp.Error)
 	}

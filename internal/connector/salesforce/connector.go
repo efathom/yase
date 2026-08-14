@@ -159,7 +159,7 @@ func (c *Connector) readObject(ctx context.Context, stream connector.ConfiguredS
 			var cursorState struct {
 				LastModstamp string `json:"last_modstamp"`
 			}
-			json.Unmarshal(raw, &cursorState)
+			_ = json.Unmarshal(raw, &cursorState)
 			lastModstamp = cursorState.LastModstamp
 		}
 		if lastModstamp != "" {

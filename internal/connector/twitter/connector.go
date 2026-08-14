@@ -164,7 +164,7 @@ func (c *Connector) resolveUsernames(ctx context.Context) ([]string, error) {
 			Username string `json:"username"`
 		} `json:"data"`
 	}
-	json.Unmarshal(body, &resp)
+	_ = json.Unmarshal(body, &resp)
 
 	var ids []string
 	for _, u := range resp.Data {
@@ -301,7 +301,7 @@ func (c *Connector) getSinceID(state *connector.SyncState, stateKey string, mode
 		var cursorState struct {
 			SinceID string `json:"since_id"`
 		}
-		json.Unmarshal(raw, &cursorState)
+		_ = json.Unmarshal(raw, &cursorState)
 		return cursorState.SinceID
 	}
 	return ""

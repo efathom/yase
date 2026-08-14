@@ -1,3 +1,4 @@
+// Package metrics defines the Prometheus metrics exposed by YASE services.
 package metrics
 
 import (

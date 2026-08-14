@@ -127,7 +127,7 @@ func (c *Connector) readIssues(ctx context.Context, stream connector.ConfiguredS
 			var cursorState struct {
 				LastUpdated string `json:"last_updated"`
 			}
-			json.Unmarshal(raw, &cursorState)
+			_ = json.Unmarshal(raw, &cursorState)
 			lastUpdated = cursorState.LastUpdated
 			if lastUpdated != "" {
 				// Validate the cursor is a timestamp before interpolating into

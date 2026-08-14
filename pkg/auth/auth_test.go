@@ -148,6 +148,7 @@ func TestHTTPMiddleware(t *testing.T) {
 		ac := FromContext(r.Context())
 		if ac == nil {
 			t.Error("expected auth context")
+			return
 		}
 		fmt.Fprintf(w, "tenant=%s", ac.TenantID)
 	}))

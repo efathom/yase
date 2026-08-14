@@ -184,7 +184,7 @@ func (c *Connector) readChanges(ctx context.Context, state *connector.SyncState,
 		var cursorState struct {
 			PageToken string `json:"page_token"`
 		}
-		json.Unmarshal(raw, &cursorState)
+		_ = json.Unmarshal(raw, &cursorState)
 		startToken = cursorState.PageToken
 	}
 

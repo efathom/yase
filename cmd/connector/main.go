@@ -115,7 +115,7 @@ func main() {
 	// Start scheduler
 	go func() {
 		slog.Info("Connector scheduler started", "jobs", len(scheduler.ListJobs()))
-		scheduler.Start(ctx)
+		_ = scheduler.Start(ctx)
 	}()
 
 	// Graceful shutdown
@@ -128,7 +128,7 @@ func main() {
 	scheduler.Stop()
 	shutCtx, shutCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer shutCancel()
-	srv.Shutdown(shutCtx)
+	_ = srv.Shutdown(shutCtx)
 	slog.Info("Connector manager shut down")
 }
 
@@ -270,5 +270,5 @@ func jobSummary(j *connector.SyncJob) map[string]interface{} {
 func writeJSON(w http.ResponseWriter, code int, v interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
-	json.NewEncoder(w).Encode(v)
+	_ = json.NewEncoder(w).Encode(v)
 }

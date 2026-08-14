@@ -73,7 +73,7 @@ func (lc *LocalCache) Get(ctx context.Context, remotePath string) (string, error
 	n, err := io.Copy(f, rc)
 	f.Close()
 	if err != nil {
-		os.Remove(localPath)
+		_ = os.Remove(localPath)
 		return "", fmt.Errorf("write: %w", err)
 	}
 
@@ -99,7 +99,7 @@ func (lc *LocalCache) Invalidate(remotePath string) {
 	lc.mu.Lock()
 	defer lc.mu.Unlock()
 	if entry, ok := lc.entries[remotePath]; ok {
-		os.Remove(entry.localPath)
+		_ = os.Remove(entry.localPath)
 		lc.usedSize -= entry.size
 		delete(lc.entries, remotePath)
 	}
@@ -134,7 +134,7 @@ func (lc *LocalCache) evictLocked() {
 			}
 		}
 		entry := lc.entries[lruKey]
-		os.Remove(entry.localPath)
+		_ = os.Remove(entry.localPath)
 		lc.usedSize -= entry.size
 		delete(lc.entries, lruKey)
 	}

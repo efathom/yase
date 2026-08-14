@@ -175,7 +175,7 @@ func main() {
 	if cfg.Cluster.Bootstrap {
 		waitForLeader(raftNode, 10*time.Second)
 		shardAddr := fmt.Sprintf("%s:%d", hostFromAddr(cfg.Cluster.RaftAddr), cfg.Cluster.ShardPort)
-		raftNode.Apply(&consensus.Command{
+		_ = raftNode.Apply(&consensus.Command{
 			Type:         consensus.CmdRegisterNode,
 			RegisterNode: &consensus.RegisterNode{ID: cfg.Cluster.NodeID, Address: shardAddr, HTTPAddr: httpAddr},
 		}, 5*time.Second)
@@ -234,7 +234,7 @@ func main() {
 	cancel()
 	gracefulStop(grpcServer)
 	daemon.Close()
-	raftNode.Shutdown()
+	_ = raftNode.Shutdown()
 	slog.Info("Cluster node shut down")
 }
 
@@ -264,7 +264,7 @@ func joinCluster(leaderHTTPAddr, nodeID, raftAddr, shardAddr, httpAddr string) e
 	defer resp.Body.Close()
 	if resp.StatusCode != 200 {
 		var result map[string]string
-		json.NewDecoder(resp.Body).Decode(&result)
+		_ = json.NewDecoder(resp.Body).Decode(&result)
 		return fmt.Errorf("join failed (%d): %s", resp.StatusCode, result["error"])
 	}
 	return nil

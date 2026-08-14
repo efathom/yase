@@ -249,7 +249,7 @@ func (w *WorkerNode) pollForURLs(ctx context.Context) {
 				continue
 			}
 			var urls []string
-			json.NewDecoder(resp.Body).Decode(&urls)
+			_ = json.NewDecoder(resp.Body).Decode(&urls)
 			resp.Body.Close()
 
 			for _, u := range urls {

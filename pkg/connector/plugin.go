@@ -10,6 +10,7 @@
 //
 // The connector manager discovers plugins via glob pattern and registers them
 // in the DefaultRegistry.
+
 package connector
 
 import (
@@ -139,13 +140,13 @@ type ConnectorRPCClient struct {
 
 func (c *ConnectorRPCClient) ID() string {
 	var resp string
-	c.client.Call("Plugin.ID", struct{}{}, &resp)
+	_ = c.client.Call("Plugin.ID", struct{}{}, &resp)
 	return resp
 }
 
 func (c *ConnectorRPCClient) DisplayName() string {
 	var resp string
-	c.client.Call("Plugin.DisplayName", struct{}{}, &resp)
+	_ = c.client.Call("Plugin.DisplayName", struct{}{}, &resp)
 	return resp
 }
 
@@ -173,7 +174,7 @@ func (c *ConnectorRPCClient) Discover(ctx context.Context) (*Catalog, error) {
 		return nil, fmt.Errorf("%s", resp.Error)
 	}
 	var catalog Catalog
-	json.Unmarshal(resp.CatalogJSON, &catalog)
+	_ = json.Unmarshal(resp.CatalogJSON, &catalog)
 	return &catalog, nil
 }
 
@@ -202,11 +203,11 @@ func (c *ConnectorRPCClient) Read(ctx context.Context, streams []ConfiguredStrea
 
 		// Update state from plugin
 		if len(resp.StateJSON) > 0 {
-			json.Unmarshal(resp.StateJSON, state)
+			_ = json.Unmarshal(resp.StateJSON, state)
 		}
 
 		var allRecords []Record
-		json.Unmarshal(resp.RecordsJSON, &allRecords)
+		_ = json.Unmarshal(resp.RecordsJSON, &allRecords)
 		for _, r := range allRecords {
 			records <- r
 		}

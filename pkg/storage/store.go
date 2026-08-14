@@ -1,3 +1,5 @@
+// Package storage provides object storage backends (S3, filesystem, cached)
+// used by the offline index builder and connectors.
 package storage
 
 import (
@@ -126,7 +128,7 @@ func (c *CachedStore) Download(ctx context.Context, path string) (io.ReadCloser,
 	}
 	if _, err := io.Copy(f, rc); err != nil {
 		f.Close()
-		os.Remove(cachePath)
+		_ = os.Remove(cachePath)
 		return nil, fmt.Errorf("write cache: %w", err)
 	}
 	f.Close()
@@ -142,6 +144,6 @@ func (c *CachedStore) List(ctx context.Context, prefix string) ([]string, error)
 func (c *CachedStore) Delete(ctx context.Context, path string) error {
 	// Remove from cache too
 	cachePath := filepath.Join(c.cacheDir, path)
-	os.Remove(cachePath)
+	_ = os.Remove(cachePath)
 	return c.remote.Delete(ctx, path)
 }

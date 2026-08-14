@@ -29,7 +29,7 @@ func (p *NativePDFParser) Parse(_ context.Context, content []byte, _ string) (*P
 		return nil, fmt.Errorf("create temp: %w", err)
 	}
 	tmpPath := tmp.Name()
-	defer os.Remove(tmpPath)
+	defer func() { _ = os.Remove(tmpPath) }()
 
 	if _, err := io.Copy(tmp, bytes.NewReader(content)); err != nil {
 		tmp.Close()

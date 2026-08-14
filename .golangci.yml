@@ -1,0 +1,28 @@
+version: "2"
+
+run:
+  timeout: 5m
+
+linters:
+  default: standard
+  settings:
+    staticcheck:
+      # Disable style "quickfix" checks, stylecheck (ST) checks such as
+      # package-comment conventions, deprecated-API notices, and
+      # struct-literal conversion suggestions — none are bugs.
+      checks:
+        - "all"
+        - "-QF*"
+        - "-ST*"
+        - "-SA1019"
+        - "-S1016"
+  exclusions:
+    rules:
+      # Test code commonly ignores error returns (table-driven setups, mocks).
+      - path: "_test\\.go$"
+        linters:
+          - errcheck
+      # Best-effort resource release (.Close) errors are intentionally ignored.
+      - linters:
+          - errcheck
+        text: "Error return value of .*\\.Close"

@@ -156,7 +156,7 @@ func (c *Connector) readFiles(ctx context.Context, stream connector.ConfiguredSt
 			var cursorState struct {
 				LastModified string `json:"last_modified"`
 			}
-			json.Unmarshal(raw, &cursorState)
+			_ = json.Unmarshal(raw, &cursorState)
 			if cursorState.LastModified != "" {
 				lastModified, _ = time.Parse(time.RFC3339, cursorState.LastModified)
 			}

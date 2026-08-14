@@ -150,7 +150,7 @@ func (c *Connector) getDefaultDriveID(ctx context.Context, siteID string) (strin
 	var resp struct {
 		ID string `json:"id"`
 	}
-	json.Unmarshal(body, &resp)
+	_ = json.Unmarshal(body, &resp)
 	return resp.ID, nil
 }
 
@@ -226,7 +226,7 @@ func (c *Connector) readDelta(ctx context.Context, state *connector.SyncState, r
 			var cursorState struct {
 				DeltaLink string `json:"delta_link"`
 			}
-			json.Unmarshal(raw, &cursorState)
+			_ = json.Unmarshal(raw, &cursorState)
 			deltaLink = cursorState.DeltaLink
 		}
 
@@ -245,7 +245,7 @@ func (c *Connector) readDelta(ctx context.Context, state *connector.SyncState, r
 			}
 
 			var resp graphDeltaResponse
-			json.Unmarshal(body, &resp)
+			_ = json.Unmarshal(body, &resp)
 
 			for _, item := range resp.Value {
 				if item.Deleted != nil {
@@ -292,6 +292,9 @@ func (c *Connector) itemToRecord(ctx context.Context, driveID string, item *grap
 	if err != nil {
 		return nil, fmt.Errorf("download %s: %w", item.Name, err)
 	}
+	if c.config.MaxObjectSize > 0 && int64(len(body)) > c.config.MaxObjectSize {
+		return nil, fmt.Errorf("content exceeds maximum size of %d bytes", c.config.MaxObjectSize)
+	}
 
 	mimeType := item.File.MimeType
 	if mimeType == "" && resp != nil {
@@ -323,22 +326,6 @@ func (c *Connector) itemToRecord(ctx context.Context, driveID string, item *grap
 		Action:     connector.Upsert,
 		EmittedAt:  time.Now(),
 	}, nil
-}
-
-// Ignore the body param from DoRequest for download — we get raw bytes
-func (c *Connector) downloadContent(ctx context.Context, path string) ([]byte, string, error) {
-	resp, body, err := c.http.DoRequest(ctx, "GET", path, nil)
-	if err != nil {
-		return nil, "", err
-	}
-	if c.config.MaxObjectSize > 0 && int64(len(body)) > c.config.MaxObjectSize {
-		return nil, "", fmt.Errorf("content exceeds maximum size of %d bytes", c.config.MaxObjectSize)
-	}
-	ct := ""
-	if resp != nil {
-		ct = resp.Header.Get("Content-Type")
-	}
-	return body, ct, nil
 }
 
 // --- Microsoft Graph API response types ---

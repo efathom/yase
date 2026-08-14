@@ -183,7 +183,7 @@ func (c *Connector) readTable(ctx context.Context, stream connector.ConfiguredSt
 			var cursorState struct {
 				LastTimestamp string `json:"last_timestamp"`
 			}
-			json.Unmarshal(raw, &cursorState)
+			_ = json.Unmarshal(raw, &cursorState)
 			lastTimestamp = cursorState.LastTimestamp
 		}
 		if lastTimestamp != "" {

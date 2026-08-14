@@ -54,7 +54,7 @@ func Build(ctx context.Context, docs []index.Document, cfg *BuildConfig, store s
 		node := ring.GetNode(fmt.Sprintf("%d", doc.ID))
 		// Parse shard ID from node name
 		var shardID uint32
-		fmt.Sscanf(node, "shard-%d", &shardID)
+		_, _ = fmt.Sscanf(node, "shard-%d", &shardID)
 		shardDocs[shardID] = append(shardDocs[shardID], doc)
 	}
 

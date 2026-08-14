@@ -319,7 +319,7 @@ func (ms *MasterScheduler) AssignHandler(w http.ResponseWriter, r *http.Request)
 	}
 done:
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(urls)
+	_ = json.NewEncoder(w).Encode(urls)
 }
 
 // SeedHandler accepts POST requests with a JSON array of seed URLs,
@@ -364,7 +364,7 @@ func (ms *MasterScheduler) SeedHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	fmt.Fprintf(w, `{"seeded":%d,"total":%d}`, added, len(urls))
+	_, _ = fmt.Fprintf(w, `{"seeded":%d,"total":%d}`, added, len(urls))
 }
 
 // DiscoverHandler accepts POST with discovered outlinks from a worker,

@@ -159,7 +159,7 @@ func (c *Connector) readCursor(stream connector.ConfiguredStream, state *connect
 	var cursorState struct {
 		LastModified string `json:"last_modified"`
 	}
-	json.Unmarshal(raw, &cursorState)
+	_ = json.Unmarshal(raw, &cursorState)
 	return cursorState.LastModified
 }
 

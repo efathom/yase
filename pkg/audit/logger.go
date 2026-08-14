@@ -82,7 +82,7 @@ func (l *Logger) Log(event Event) {
 	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	l.enc.Encode(event) // errors are non-fatal for audit
+	_ = l.enc.Encode(event) // errors are non-fatal for audit
 }
 
 // LogSearch records a search event.

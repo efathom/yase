@@ -49,7 +49,7 @@ func main() {
 	}); err != nil {
 		slog.Warn("tracing setup failed", "error", err)
 	} else {
-		defer shutdownTracing(context.Background())
+		defer func() { _ = shutdownTracing(context.Background()) }()
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())

@@ -169,7 +169,7 @@ func (f *FileStateStore) ListJobs(ctx context.Context) ([]*SyncJob, error) {
 func (f *FileStateStore) DeleteJob(ctx context.Context, jobID string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	os.Remove(f.statePath(jobID))
+	_ = os.Remove(f.statePath(jobID))
 	return os.Remove(f.jobPath(jobID))
 }
 

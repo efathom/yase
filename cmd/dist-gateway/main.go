@@ -130,7 +130,7 @@ func main() {
 	slog.Info("Shutting down")
 	shutCtx, shutCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer shutCancel()
-	server.Shutdown(shutCtx)
+	_ = server.Shutdown(shutCtx)
 	cancel()
 	slog.Info("Distributed gateway shut down")
 }
@@ -197,5 +197,5 @@ func handleSearch(w http.ResponseWriter, r *http.Request, coord *query.Coordinat
 func writeJSON(w http.ResponseWriter, code int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
-	json.NewEncoder(w).Encode(v)
+	_ = json.NewEncoder(w).Encode(v)
 }

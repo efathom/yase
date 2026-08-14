@@ -52,7 +52,7 @@ func main() {
 	}); err != nil {
 		slog.Warn("tracing setup failed", "error", err)
 	} else {
-		defer shutdownTracing(context.Background())
+		defer func() { _ = shutdownTracing(context.Background()) }()
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -187,6 +187,6 @@ func main() {
 	daemon.Close()
 	shutCtx, shutCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer shutCancel()
-	srv.Shutdown(shutCtx)
+	_ = srv.Shutdown(shutCtx)
 	slog.Info("Local server shut down cleanly")
 }

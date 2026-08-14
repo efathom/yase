@@ -69,7 +69,7 @@ func (s *Scheduler) Add(job *SyncJob) error {
 	}
 
 	// Persist job
-	s.stateStore.SaveJob(context.Background(), job)
+	_ = s.stateStore.SaveJob(context.Background(), job)
 
 	return nil
 }
@@ -270,7 +270,7 @@ func (s *Scheduler) executeJob(jobID string) {
 	job.LastSyncAt = time.Now()
 	s.mu.Unlock()
 
-	s.stateStore.SaveJob(ctx, job)
+	_ = s.stateStore.SaveJob(ctx, job)
 
 	SyncDuration.WithLabelValues(job.ID, string(job.Mode)).Observe(elapsed.Seconds())
 	SyncStatus.WithLabelValues(job.ID).Set(3) // completed
@@ -289,5 +289,5 @@ func (s *Scheduler) failJob(job *SyncJob, err error) {
 	job.LastSyncAt = time.Now()
 	s.mu.Unlock()
 
-	s.stateStore.SaveJob(context.Background(), job)
+	_ = s.stateStore.SaveJob(context.Background(), job)
 }

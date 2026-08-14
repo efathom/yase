@@ -135,7 +135,7 @@ func main() {
 	healthServer.SetServingStatus("yase.v1.IngestionService", healthpb.HealthCheckResponse_NOT_SERVING)
 
 	gracefulStop(grpcServer)
-	pool.Stop()
+	_ = pool.Stop()
 	rdb.Close()
 	cancel()
 	slog.Info("Ingestion server shut down cleanly")
