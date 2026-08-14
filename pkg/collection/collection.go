@@ -51,7 +51,7 @@ type EmbedderRef struct {
 
 // ChunkConfig controls text chunking behavior for a collection.
 type ChunkConfig struct {
-	Strategy  string  `json:"strategy"`   // "semantic", "fixed", "ast"
-	Threshold float32 `json:"threshold"`  // for semantic chunking
+	Strategy  string  `json:"strategy"`  // "semantic", "fixed", "ast"
+	Threshold float32 `json:"threshold"` // for semantic chunking
 	MaxTokens int     `json:"max_tokens"`
 }

@@ -23,24 +23,24 @@ func TestS3ConnectorE2E(t *testing.T) {
 
 	// Seed test files
 	seedS3Files(t, endpoint, bucket, map[string]string{
-		"docs/readme.md":        "# YASE\nA hybrid search engine in Go.",
-		"docs/architecture.md":  "# Architecture\nHNSW + BM25 with RRF fusion.",
-		"docs/notes.txt":        "Some plain text notes.",
-		"images/logo.png":       "fake-png-bytes",
-		"docs/report.pdf":       "fake-pdf-bytes",
+		"docs/readme.md":       "# YASE\nA hybrid search engine in Go.",
+		"docs/architecture.md": "# Architecture\nHNSW + BM25 with RRF fusion.",
+		"docs/notes.txt":       "Some plain text notes.",
+		"images/logo.png":      "fake-png-bytes",
+		"docs/report.pdf":      "fake-pdf-bytes",
 	})
 
 	// Create S3 connector
 	conn, err := connector.DefaultRegistry.Create(connector.ConnectorConfig{
 		Type: "s3",
 		Config: map[string]interface{}{
-			"endpoint":        endpoint,
-			"bucket":          bucket,
-			"prefix":          "docs/",
-			"region":          "us-east-1",
+			"endpoint":         endpoint,
+			"bucket":           bucket,
+			"prefix":           "docs/",
+			"region":           "us-east-1",
 			"force_path_style": true,
-			"access_key":      "minioadmin",
-			"secret_key":      "minioadmin",
+			"access_key":       "minioadmin",
+			"secret_key":       "minioadmin",
 			"file_extensions":  []interface{}{".md", ".txt"},
 		},
 		Auth: &connector.AuthConfig{Method: ""},
@@ -111,12 +111,12 @@ func TestS3ConnectorIncremental(t *testing.T) {
 	conn, err := connector.DefaultRegistry.Create(connector.ConnectorConfig{
 		Type: "s3",
 		Config: map[string]interface{}{
-			"endpoint":        endpoint,
-			"bucket":          bucket,
-			"region":          "us-east-1",
+			"endpoint":         endpoint,
+			"bucket":           bucket,
+			"region":           "us-east-1",
 			"force_path_style": true,
-			"access_key":      "minioadmin",
-			"secret_key":      "minioadmin",
+			"access_key":       "minioadmin",
+			"secret_key":       "minioadmin",
 		},
 		Auth: &connector.AuthConfig{Method: ""},
 	})

@@ -7,10 +7,10 @@ import (
 
 // HighlightConfig controls snippet generation.
 type HighlightConfig struct {
-	MaxFragments   int    // max fragments per result (default 3)
-	FragmentSize   int    // characters per fragment (default 150)
-	PreTag         string // highlight start tag (default "<mark>")
-	PostTag        string // highlight end tag (default "</mark>")
+	MaxFragments int    // max fragments per result (default 3)
+	FragmentSize int    // characters per fragment (default 150)
+	PreTag       string // highlight start tag (default "<mark>")
+	PostTag      string // highlight end tag (default "</mark>")
 }
 
 // DefaultHighlightConfig returns sensible defaults.

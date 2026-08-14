@@ -48,12 +48,12 @@ func TestRestoreAll_CreatesDefault(t *testing.T) {
 
 func TestCreate(t *testing.T) {
 	tests := []struct {
-		name      string
-		id        string
-		colName   string
-		tenantID  string
-		cfg       CollectionConfig
-		wantErr   bool
+		name     string
+		id       string
+		colName  string
+		tenantID string
+		cfg      CollectionConfig
+		wantErr  bool
 	}{
 		{
 			name:     "basic creation",

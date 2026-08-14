@@ -118,4 +118,3 @@ func (b *BlugeStore) ComputeFacetsFromIDs(ctx context.Context, docIDs []uint32, 
 	}
 	return results, nil
 }
-

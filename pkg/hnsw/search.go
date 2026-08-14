@@ -11,10 +11,10 @@ type Candidate struct {
 // minHeap orders candidates closest-first (smallest distance at top).
 type minHeap []Candidate
 
-func (h minHeap) Len() int            { return len(h) }
-func (h minHeap) Less(i, j int) bool  { return h[i].Distance < h[j].Distance }
-func (h minHeap) Swap(i, j int)       { h[i], h[j] = h[j], h[i] }
-func (h *minHeap) Push(x any) { *h = append(*h, x.(Candidate)) }
+func (h minHeap) Len() int           { return len(h) }
+func (h minHeap) Less(i, j int) bool { return h[i].Distance < h[j].Distance }
+func (h minHeap) Swap(i, j int)      { h[i], h[j] = h[j], h[i] }
+func (h *minHeap) Push(x any)        { *h = append(*h, x.(Candidate)) }
 func (h *minHeap) Pop() any {
 	old := *h
 	item := old[len(old)-1]
@@ -25,10 +25,10 @@ func (h *minHeap) Pop() any {
 // maxHeap orders candidates furthest-first (largest distance at top) for eviction.
 type maxHeap []Candidate
 
-func (h maxHeap) Len() int            { return len(h) }
-func (h maxHeap) Less(i, j int) bool  { return h[i].Distance > h[j].Distance }
-func (h maxHeap) Swap(i, j int)       { h[i], h[j] = h[j], h[i] }
-func (h *maxHeap) Push(x any) { *h = append(*h, x.(Candidate)) }
+func (h maxHeap) Len() int           { return len(h) }
+func (h maxHeap) Less(i, j int) bool { return h[i].Distance > h[j].Distance }
+func (h maxHeap) Swap(i, j int)      { h[i], h[j] = h[j], h[i] }
+func (h *maxHeap) Push(x any)        { *h = append(*h, x.(Candidate)) }
 func (h *maxHeap) Pop() any {
 	old := *h
 	item := old[len(old)-1]

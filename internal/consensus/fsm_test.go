@@ -216,6 +216,6 @@ type testSnapshotSink struct {
 }
 
 func (s *testSnapshotSink) Write(p []byte) (int, error) { return s.buf.Write(p) }
-func (s *testSnapshotSink) Close() error                 { return nil }
-func (s *testSnapshotSink) ID() string                   { return "test" }
-func (s *testSnapshotSink) Cancel() error                { return nil }
+func (s *testSnapshotSink) Close() error                { return nil }
+func (s *testSnapshotSink) ID() string                  { return "test" }
+func (s *testSnapshotSink) Cancel() error               { return nil }

@@ -110,7 +110,7 @@ func NewTunedCrawlerClient(dnsTTL time.Duration) (*http.Client, *DNSCache) {
 		MaxIdleConnsPerHost:   100,
 		MaxConnsPerHost:       50,
 		IdleConnTimeout:       90 * time.Second,
-		TLSHandshakeTimeout:  10 * time.Second,
+		TLSHandshakeTimeout:   10 * time.Second,
 		ResponseHeaderTimeout: 15 * time.Second,
 		ExpectContinueTimeout: 0,
 	}

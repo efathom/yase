@@ -13,12 +13,12 @@ import (
 
 // mockBroker implements EventBroker for testing.
 type mockBroker struct {
-	mu       sync.Mutex
-	records  []*ingestionv1.CrawlRecord
-	err      error
-	closed   bool
-	delay    time.Duration
-	callCnt  atomic.Int32
+	mu      sync.Mutex
+	records []*ingestionv1.CrawlRecord
+	err     error
+	closed  bool
+	delay   time.Duration
+	callCnt atomic.Int32
 }
 
 func (m *mockBroker) Produce(_ context.Context, record *ingestionv1.CrawlRecord) error {

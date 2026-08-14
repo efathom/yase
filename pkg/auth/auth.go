@@ -16,8 +16,8 @@ const authContextKey contextKey = iota
 type AuthContext struct {
 	TenantID string   `json:"tenant_id"`
 	UserID   string   `json:"user_id"`
-	Roles    []string `json:"roles"`   // "admin", "reader", "writer"
-	Scopes   []string `json:"scopes"`  // "search", "ingest", "admin", "delete"
+	Roles    []string `json:"roles"`  // "admin", "reader", "writer"
+	Scopes   []string `json:"scopes"` // "search", "ingest", "admin", "delete"
 }
 
 // HasRole checks if the auth context includes a specific role.

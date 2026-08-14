@@ -11,9 +11,9 @@ import (
 // shard-to-node placement. Uses FNV-1a for deterministic hashing.
 type HashRing struct {
 	mu           sync.RWMutex
-	ring         []ringEntry          // sorted by hash
-	vnodeCount   int                  // virtual nodes per physical node
-	nodeToVnodes map[string][]uint32  // nodeID → vnode hashes (for removal)
+	ring         []ringEntry         // sorted by hash
+	vnodeCount   int                 // virtual nodes per physical node
+	nodeToVnodes map[string][]uint32 // nodeID → vnode hashes (for removal)
 }
 
 type ringEntry struct {

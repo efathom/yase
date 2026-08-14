@@ -339,9 +339,9 @@ type mockConnector struct {
 	id string
 }
 
-func (m *mockConnector) ID() string            { return m.id }
-func (m *mockConnector) DisplayName() string   { return "Mock" }
-func (m *mockConnector) Spec() *ConnectorSpec  { return &ConnectorSpec{} }
+func (m *mockConnector) ID() string                       { return m.id }
+func (m *mockConnector) DisplayName() string              { return "Mock" }
+func (m *mockConnector) Spec() *ConnectorSpec             { return &ConnectorSpec{} }
 func (m *mockConnector) Validate(_ context.Context) error { return nil }
 func (m *mockConnector) Discover(_ context.Context) (*Catalog, error) {
 	return &Catalog{Streams: []Stream{{Name: "test"}}}, nil

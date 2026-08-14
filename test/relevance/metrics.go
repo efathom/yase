@@ -9,10 +9,10 @@ import (
 
 // Result represents a search result with its relevance label.
 type Result struct {
-	DocID     uint32
-	Score     float64
-	Relevant  bool // ground truth: is this document relevant?
-	GradeInt  int  // graded relevance (0=irrelevant, 1=marginal, 2=relevant, 3=highly relevant)
+	DocID    uint32
+	Score    float64
+	Relevant bool // ground truth: is this document relevant?
+	GradeInt int  // graded relevance (0=irrelevant, 1=marginal, 2=relevant, 3=highly relevant)
 }
 
 // RecallAtK computes Recall@K: fraction of relevant documents found in top K results.
@@ -93,7 +93,7 @@ func computeDCG(results []Result, k int) float64 {
 	var dcg float64
 	for i := 0; i < k && i < len(results); i++ {
 		gain := math.Pow(2, float64(results[i].GradeInt)) - 1
-		discount := math.Log2(float64(i+2)) // log2(i+2) since i is 0-indexed
+		discount := math.Log2(float64(i + 2)) // log2(i+2) since i is 0-indexed
 		dcg += gain / discount
 	}
 	return dcg
@@ -130,12 +130,12 @@ func MAP(queryResults [][]Result, totalRelevants []int) float64 {
 
 // EvalReport summarizes search quality metrics for a query set.
 type EvalReport struct {
-	NumQueries      int     `json:"num_queries"`
-	MeanRecallAt10  float64 `json:"mean_recall_at_10"`
+	NumQueries        int     `json:"num_queries"`
+	MeanRecallAt10    float64 `json:"mean_recall_at_10"`
 	MeanPrecisionAt10 float64 `json:"mean_precision_at_10"`
-	MeanMRR         float64 `json:"mean_mrr"`
-	MeanNDCGAt10    float64 `json:"mean_ndcg_at_10"`
-	MAP             float64 `json:"map"`
+	MeanMRR           float64 `json:"mean_mrr"`
+	MeanNDCGAt10      float64 `json:"mean_ndcg_at_10"`
+	MAP               float64 `json:"map"`
 }
 
 // Evaluate runs all metrics on a set of query results and returns a report.
@@ -154,11 +154,11 @@ func Evaluate(queryResults [][]Result, totalRelevants []int) EvalReport {
 	}
 
 	return EvalReport{
-		NumQueries:       n,
-		MeanRecallAt10:   sumRecall / float64(n),
+		NumQueries:        n,
+		MeanRecallAt10:    sumRecall / float64(n),
 		MeanPrecisionAt10: sumPrecision / float64(n),
-		MeanMRR:          sumMRR / float64(n),
-		MeanNDCGAt10:     sumNDCG / float64(n),
-		MAP:              MAP(queryResults, totalRelevants),
+		MeanMRR:           sumMRR / float64(n),
+		MeanNDCGAt10:      sumNDCG / float64(n),
+		MAP:               MAP(queryResults, totalRelevants),
 	}
 }

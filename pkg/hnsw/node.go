@@ -11,8 +11,8 @@ type Node struct {
 	ID                 uint32
 	Level              int
 	VectorOffset       uint64
-	BinaryVectorOffset uint64 // offset to binary-quantized vector in arena (0 if BBQ disabled)
-	BinaryVectorLen    int    // number of bytes for the binary vector
+	BinaryVectorOffset uint64                     // offset to binary-quantized vector in arena (0 if BBQ disabled)
+	BinaryVectorLen    int                        // number of bytes for the binary vector
 	Edges              []atomic.Pointer[[]uint32] // per-layer neighbor lists
 }
 

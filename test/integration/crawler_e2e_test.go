@@ -16,11 +16,11 @@ import (
 )
 
 // TestCrawlerDomainFilterE2E verifies the full master-worker crawl loop:
-// 1. A local HTTP server serves a small site with inter-linked pages and an
-//    external link to an off-domain page.
-// 2. The master's DomainFilter whitelists only the test server's hostname.
-// 3. The worker crawls, discovers outlinks, and reports them back.
-// 4. We assert all on-domain pages are crawled and no off-domain pages are.
+//  1. A local HTTP server serves a small site with inter-linked pages and an
+//     external link to an off-domain page.
+//  2. The master's DomainFilter whitelists only the test server's hostname.
+//  3. The worker crawls, discovers outlinks, and reports them back.
+//  4. We assert all on-domain pages are crawled and no off-domain pages are.
 func TestCrawlerDomainFilterE2E(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test in -short mode")
@@ -126,7 +126,7 @@ func TestCrawlerDomainFilterE2E(t *testing.T) {
 	results := make(chan coordinator.CrawlResult, 100)
 
 	worker := coordinator.NewWorkerNode("e2e-worker", masterServer.URL, rl, jobs, results)
-	worker.RateLimit = 10              // 10 requests per second — fast for tests
+	worker.RateLimit = 10 // 10 requests per second — fast for tests
 	worker.RateWindow = time.Second
 	worker.Start(ctx, 4)
 
