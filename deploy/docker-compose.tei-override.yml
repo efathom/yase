@@ -1,0 +1,34 @@
+## Optional TEI override for local runtimes without a Rust toolchain.
+##
+## deploy/docker-compose.yml builds TEI from source (Dockerfile.tei), which
+## compiles the full text-embeddings-inference Rust workspace and takes a long
+## time. On dev machines (especially Apple Silicon under VMs like colima),
+## it is far faster to use the prebuilt TEI image instead.
+##
+## Usage:
+##   docker compose \
+##     -f deploy/docker-compose.yml \
+##     -f deploy/docker-compose.tei-override.yml \
+##     up -d redis kafka tei
+##
+## Notes:
+##   - The prebuilt image is multi-arch; under emulated VMs (colima/qemu) it
+##     runs amd64 via emulation, which is memory hungry. The 12 GiB limit +
+##     shm bump below are required to avoid an OOM-kill (exit 137) during
+##     model warmup. The VM itself must have >= 14 GiB (see docs/end-to-end-testing.md).
+##   - The model (Alibaba-NLP/gte-modernbert-base) is downloaded once into the
+##     tei-models named volume on first start.
+
+services:
+  tei:
+    build: null
+    image: ghcr.io/huggingface/text-embeddings-inference:cpu-latest
+    deploy:
+      resources:
+        limits:
+          memory: 12G
+    shm_size: 4g
+
+  tei-reranker:
+    build: null
+    image: ghcr.io/huggingface/text-embeddings-inference:cpu-latest

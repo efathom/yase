@@ -9,6 +9,9 @@ import (
 // NewFromConfig builds an Authenticator from the application auth configuration.
 // Returns (nil, nil) when auth is disabled or method is "none".
 func NewFromConfig(cfg config.AuthConfig) (Authenticator, error) {
+	if !cfg.Enabled {
+		return nil, nil
+	}
 	switch cfg.Method {
 	case "", "none":
 		return nil, nil
