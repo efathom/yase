@@ -124,6 +124,7 @@ See [Getting Started](docs/getting-started.md) for the full walkthrough (RAG, au
 | [Configuration & Security](docs/configuration.md) | Config reference, auth, TLS, tenant isolation, observability |
 | [API Reference](docs/api-reference.md) | Endpoints + Go client SDK |
 | [Deployment & Operations](docs/deployment.md) | Docker Compose, Helm, build & test |
+| [End-to-End Testing](docs/end-to-end-testing.md) | Local 3-node distributed E2E: infra setup, colima, TEI, defects found |
 
 ## License
 

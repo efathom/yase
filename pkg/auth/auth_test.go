@@ -11,6 +11,8 @@ import (
 	"net/http/httptest"
 	"testing"
 	"time"
+
+	"github.com/efathom/yase/pkg/config"
 )
 
 func TestAPIKeyAuthenticator(t *testing.T) {
@@ -231,6 +233,48 @@ func TestRequireScope(t *testing.T) {
 	handler.ServeHTTP(w3, req3)
 	if w3.Code != 200 {
 		t.Errorf("has scope: got %d, want 200", w3.Code)
+	}
+}
+
+func TestNewFromConfigDisabled(t *testing.T) {
+	tests := []struct {
+		name string
+		cfg  config.AuthConfig
+	}{
+		{"disabled with method set", config.AuthConfig{Enabled: false, Method: "api_key"}},
+		{"disabled empty", config.AuthConfig{Enabled: false}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			authn, err := NewFromConfig(tt.cfg)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if authn != nil {
+				t.Errorf("expected nil authenticator, got %T", authn)
+			}
+		})
+	}
+}
+
+func TestNewFromConfigEnabled(t *testing.T) {
+	authn, err := NewFromConfig(config.AuthConfig{
+		Enabled: true,
+		Method:  "api_key",
+		APIKeys: []config.APIKeyConfig{{Key: "k1", TenantID: "t1", Roles: []string{"admin"}}},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if authn == nil {
+		t.Fatal("expected non-nil authenticator")
+	}
+	ac, err := authn.Authenticate(context.Background(), "k1")
+	if err != nil {
+		t.Fatalf("valid key rejected: %v", err)
+	}
+	if ac.TenantID != "t1" {
+		t.Errorf("tenant: got %q", ac.TenantID)
 	}
 }
 

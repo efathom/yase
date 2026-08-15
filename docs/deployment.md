@@ -34,6 +34,10 @@ make lint          # golangci-lint
 SKIP_CRAWLER=1 bash scripts/e2e-local.sh          # Local (24 tests)
 bash scripts/e2e-distributed.sh 5                  # 3-node cluster
 
+See [End-to-End Testing](end-to-end-testing.md) for the full local distributed
+run: standing up Redis/Kafka/TEI, the colima setup, and the auth defect it
+uncovered.
+
 # Load tests
 bash test/load/search_load.sh 100 60              # 100 rps for 60s
 ```
