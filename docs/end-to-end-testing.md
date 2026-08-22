@@ -48,7 +48,7 @@ EOF
 ```
 
 Start the VM. **Important:** the initial `--memory 8` was not enough (see
-Part 3 for the OOM sequel). Use 14 GiB from the start:
+"TEI OOM" in Part 2 for the sequel). Use 14 GiB from the start:
 
 ```bash
 colima start --cpu 4 --memory 14 --disk 80
@@ -64,7 +64,7 @@ docker compose version    # confirm plugin discovery works
 that compiles text-embeddings-inference **from source** — a very large Rust
 build that takes a long time. For a local run it is much faster to use the
 prebuilt image. A compose **override file** swaps the build for the image and
-raises the memory limits (see Part 3):
+raises the memory limits (see "TEI OOM" below):
 
 ```bash
 docker compose \
@@ -110,9 +110,12 @@ memory-hungry. The fix was two-sided:
 - bump the VM: `colima stop && colima start --cpu 4 --memory 14 --disk 80`
 - lift the container limit via the override file (12 GiB + `shm_size: 4g`)
 
-Both are captured in `deploy/docker-compose.tei-override.yml`. Without them
-the tag is `ghcr.io/huggingface/text-embeddings-inference:cpu-latest`, whose
-manifest confirms a multi-arch amd64/arm64 index.
+Both are captured in `deploy/docker-compose.tei-override.yml`, along with an
+explicit `platform: linux/amd64`. The published TEI image is **amd64-only** —
+its manifest carries no arm64 entry — which is exactly why it runs under qemu
+emulation on Apple Silicon, and why the memory headroom above is needed. The
+override pins `cpu-1.9` rather than the floating `cpu-latest` so this
+procedure stays reproducible.
 
 ---
 
@@ -127,7 +130,10 @@ The script, in order:
 1. **Reset** Redis frontier + recreate the `crawl-records` topic (6 partitions).
 2. **Start ingestion** (`:50051`).
 3. **Start 3 cluster nodes** (`cluster-node`), sharing Kafka consumer group
-   `yase-cluster`; Kafka auto-assigns 2 partitions per node:
+   `yase-cluster`. kafka-go's default `RangeGroupBalancer` assigns 2 of the 6
+   partitions to each node — 0,1 → node-0, 2,3 → node-1, 4,5 → node-2
+   (see `scripts/e2e-distributed.sh` and `internal/glue/kafka_indexer.go`,
+   which sets no explicit `GroupBalancers`):
    - node-0 (bootstrap leader): Raft `:7000`, shard gRPC `:50053`, HTTP `:9100`
    - node-1: Raft `:7001`, shard gRPC `:50054`, HTTP `:9101`
    - node-2: Raft `:7002`, shard gRPC `:50055`, HTTP `:9102`
@@ -181,8 +187,26 @@ func NewFromConfig(cfg config.AuthConfig) (Authenticator, error) {
 	...
 ```
 
-Regression tests added in `pkg/auth/auth_test.go:
-TestNewFromConfigDisabled` / `TestNewFromConfigEnabled`.
+Regression tests added in `pkg/auth/auth_test.go`:
+`TestNewFromConfigDisabled` / `TestNewFromConfigEnabled`.
+
+**The mirror case:** that fix repaired `enabled: false`, but turning auth
+genuinely *on* used to fail the same way, for the opposite reason — every gRPC
+server installed the interceptor while no gRPC *client* ever attached
+credentials. Clients now send a per-RPC token, configured as:
+
+```yaml
+auth:
+  enabled: true
+  method: api_key
+  # Presented by this process when it calls another YASE service over gRPC
+  # (crawler→ingestion, dist-gateway→shard, parser→PDF). Required in a
+  # distributed deployment, or the servers reject internal traffic.
+  client_token: "<shared service token>"
+```
+
+Set it to a value that also appears in `auth.api_keys`, so the receiving
+server can authenticate it.
 
 > **Rebuild gotcha:** the e2e script only rebuilds a binary when its own
 > `cmd/<bin>/main.go` is newer than the binary. A fix in `pkg/` does **not**
@@ -190,30 +214,41 @@ TestNewFromConfigDisabled` / `TestNewFromConfigEnabled`.
 > `rm -rf bin && bash scripts/e2e-distributed.sh`. Get `go build ./...` green
 > first.
 
-### 4.2 Node-2 indexes 0 docs — a low-volume artifact, not a bug
+### 4.2 Node-2 indexes 0 docs — still unexplained
 
 After the auth fix, search results returned but one node sometimes showed
-`0 docs (no partitions assigned?)`. Inspecting the topic explained it:
+`0 docs (no partitions assigned?)`. Inspecting the topic:
 
 ```
 crawl-records:0:0   crawl-records:1:1   crawl-records:2:0
 crawl-records:3:2   crawl-records:4:0   crawl-records:5:1
 ```
 
-Only ~4 pages were crawled (`https://go.dev/` yields few candidate links) and
-those messages landed on partitions 1/3/5. Node-2's assigned partitions
-(0/2/4) were simply empty — Kafka lag was 0 across the board and all 3 shards
-served search. This is expected murmur2 key hashing, not loss.
+Only ~4 pages were crawled (`https://go.dev/` yields few candidate links), and
+those messages landed on partitions 1, 3, and 5.
 
-Re-running with more pages proved it:
+An earlier version of this document closed the issue as partition skew. **That
+explanation does not hold.** Under the assignment documented in Part 3 —
+0,1 → node-0, 2,3 → node-1, 4,5 → node-2 — node-2 owns partition 5, which has
+a message. Every node owns at least one non-empty partition here, so an empty
+node cannot be explained by where the messages landed.
+
+What is actually known: Kafka lag was 0 across the board and all 3 shards
+served search, so nothing was lost from the topic. Whether the node consumed
+its partition and failed to index, or reported its count before the consumer
+caught up, has **not** been determined.
+
+Re-running with more pages makes the symptom disappear:
 
 ```bash
 CRAWL_WAIT=180 bash scripts/e2e-distributed.sh 80
 # → 25 passed, 0 failed — every node indexed ≥ 1 doc
 ```
 
-Takeaway for the script: the `Node-i: 0 docs` assertion is inherently flaky at
-tiny crawl volumes. With enough seed pages the distribution is deterministic.
+That is consistent with a timing/readiness race rather than a distribution
+effect, but it is not proof. Treat the `Node-i: 0 docs` assertion as flaky at
+tiny crawl volumes, and treat the underlying cause as an open question — not
+as a closed one.
 
 ### 4.3 Verification checklist
 

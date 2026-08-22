@@ -49,6 +49,16 @@ crawler:
   # blocked_domains: []              # inline blacklist
   allowed_domains_file: configs/domains/allowed-domains.txt
   blocked_domains_file: configs/domains/blocked-domains.txt
+  # Master scheduler API (/seed, /discover, /assign, /heartbeat). This is a
+  # management API: /seed injects crawl targets, so it binds to loopback by
+  # default. Binding it anywhere else requires master_token (>= 16 chars),
+  # which workers present as a bearer token.
+  master_addr: "127.0.0.1:9080"
+  # master_token: "change-me-crawler-token"
+  # Permit crawling private, loopback, and link-local addresses. Leave false:
+  # with it on, any URL reaching the frontier can pull cloud instance metadata
+  # (169.254.169.254) or loopback-bound management APIs into the index.
+  allow_private_addresses: false
 
 metrics:
   addr: ":9090"
@@ -90,6 +100,11 @@ reranker:
 auth:
   enabled: false  # set true to enable API authentication
   method: api_key  # "api_key" | "jwt" | "none"
+  # Credential this process presents when calling another YASE service over
+  # gRPC (crawler->ingestion, dist-gateway->shard, parser->PDF). Required in a
+  # distributed deployment with auth enabled, or servers reject internal
+  # traffic. Use a value that also appears in api_keys below.
+  # client_token: "change-me-service-token"
   # api_keys:
   #   - key: "your-api-key"
   #     tenant_id: "your-tenant"
@@ -101,6 +116,12 @@ auth:
   #   audience: "yase"
   #   tenant_claim: "tenant_id"
   #   roles_claim: "roles"
+  #   # Roles granted to a token with no roles claim. Empty by default, so
+  #   # such a token receives no authority at all.
+  #   default_roles: []
+  #   # Reject tokens with no tenant claim. Turn this on with multi-tenancy:
+  #   # an empty tenant produces a context the tenant filter cannot narrow.
+  #   require_tenant: false
 
 tls:
   enabled: false

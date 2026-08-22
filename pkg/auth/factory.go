@@ -31,11 +31,13 @@ func NewFromConfig(cfg config.AuthConfig) (Authenticator, error) {
 			return nil, fmt.Errorf("auth.jwt.secret: must be at least 16 characters")
 		}
 		return NewJWTAuthenticator(JWTConfig{
-			Secret:      cfg.JWT.Secret,
-			Issuer:      cfg.JWT.Issuer,
-			Audience:    cfg.JWT.Audience,
-			TenantClaim: cfg.JWT.TenantClaim,
-			RolesClaim:  cfg.JWT.RolesClaim,
+			Secret:        cfg.JWT.Secret,
+			Issuer:        cfg.JWT.Issuer,
+			Audience:      cfg.JWT.Audience,
+			TenantClaim:   cfg.JWT.TenantClaim,
+			RolesClaim:    cfg.JWT.RolesClaim,
+			DefaultRoles:  cfg.JWT.DefaultRoles,
+			RequireTenant: cfg.JWT.RequireTenant,
 		}), nil
 	default:
 		return nil, fmt.Errorf("unknown auth method %q", cfg.Method)

@@ -12,17 +12,25 @@
 ##     up -d redis kafka tei
 ##
 ## Notes:
-##   - The prebuilt image is multi-arch; under emulated VMs (colima/qemu) it
-##     runs amd64 via emulation, which is memory hungry. The 12 GiB limit +
-##     shm bump below are required to avoid an OOM-kill (exit 137) during
-##     model warmup. The VM itself must have >= 14 GiB (see docs/end-to-end-testing.md).
+##   - `build: !reset null` is required to drop the base file's build stanza.
+##     A plain `build: null` does NOT remove it: compose keeps both `build`
+##     and `image`, so the from-source build this file exists to avoid still
+##     runs, and tags its result with the upstream image name. Verify with
+##     `docker compose -f ... -f ... config` — no `build:` key should remain.
+##   - The published tag is amd64-only, so `platform` is pinned explicitly.
+##     On Apple Silicon it runs under qemu emulation, which is memory hungry:
+##     the 12 GiB limit and shm bump avoid an OOM-kill (exit 137) during model
+##     warmup. The VM itself must have >= 14 GiB (see docs/end-to-end-testing.md).
+##     The reranker needs the same headroom for the same reason.
+##   - The tag is pinned rather than floating so this procedure is reproducible.
 ##   - The model (Alibaba-NLP/gte-modernbert-base) is downloaded once into the
 ##     tei-models named volume on first start.
 
 services:
   tei:
-    build: null
-    image: ghcr.io/huggingface/text-embeddings-inference:cpu-latest
+    build: !reset null
+    image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.9
+    platform: linux/amd64
     deploy:
       resources:
         limits:
@@ -30,5 +38,11 @@ services:
     shm_size: 4g
 
   tei-reranker:
-    build: null
-    image: ghcr.io/huggingface/text-embeddings-inference:cpu-latest
+    build: !reset null
+    image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.9
+    platform: linux/amd64
+    deploy:
+      resources:
+        limits:
+          memory: 12G
+    shm_size: 4g

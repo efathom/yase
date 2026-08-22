@@ -51,7 +51,7 @@ func TestSearcher_SearchDefault(t *testing.T) {
 		{ID: 100, Text: "test document about search", Vector: vec, Metadata: map[string]string{}},
 	})
 
-	results, err := s.SearchDefault(ctx, "test", vec, nil, 10)
+	results, err := s.SearchDefault(ctx, "", "test", vec, nil, 10)
 	require.NoError(t, err)
 	assert.NotEmpty(t, results)
 	assert.Equal(t, DefaultCollectionID, results[0].CollectionID)
@@ -72,7 +72,7 @@ func TestSearcher_SearchSingle(t *testing.T) {
 		{ID: 200, Text: "hello world document", Vector: vec, Metadata: map[string]string{}},
 	})
 
-	results, err := s.SearchSingle(ctx, "col-a", "hello", vec, nil, 10)
+	results, err := s.SearchSingle(ctx, "", "col-a", "hello", vec, nil, 10)
 	require.NoError(t, err)
 	assert.NotEmpty(t, results)
 	assert.Equal(t, "col-a", results[0].CollectionID)

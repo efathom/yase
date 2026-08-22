@@ -132,10 +132,13 @@ func main() {
 	}
 	mux := http.NewServeMux()
 	handler.RegisterRoutes(mux)
-	gateway.NewCollectionHandler(mgr).RegisterRoutes(mux)
+	collectionHandler := gateway.NewCollectionHandler(mgr)
 
-	var root http.Handler = gateway.Recover(mux)
-	root = gateway.BodyLimit(10 << 20)(root) // 10 MB request body cap
+	opts := gateway.ChainOptions{
+		BodyLimit:   10 << 20, // 10 MB request body cap
+		LoadShedder: auth.NewLoadShedder(100),
+		RateScope:   "search",
+	}
 
 	if cfg.Auth.Enabled {
 		authn, err := auth.NewFromConfig(cfg.Auth)
@@ -145,20 +148,23 @@ func main() {
 		}
 		if authn != nil {
 			handler.SetAuthEnabled(true)
-			root = auth.HTTPMiddleware(authn)(root)
+			collectionHandler.SetAuthEnabled(true)
+			opts.Authenticator = authn
 		}
 	}
 
+	// Registered after SetAuthEnabled so the routes carry their scope checks.
+	collectionHandler.RegisterRoutes(mux)
+
 	if cfg.RateLimit.Enabled {
-		rl := auth.NewRateLimiter(auth.RateLimitConfig{
+		opts.RateLimiter = auth.NewRateLimiter(auth.RateLimitConfig{
 			Enabled:          cfg.RateLimit.Enabled,
 			DefaultSearchQPS: cfg.RateLimit.DefaultSearchQPS,
 			DefaultIngestRPS: cfg.RateLimit.DefaultIngestRPS,
 		})
-		root = rl.HTTPMiddleware("search")(root)
 	}
 
-	root = auth.NewLoadShedder(100).HTTPMiddleware(root)
+	root := gateway.Chain(mux, opts)
 
 	addr := fmt.Sprintf(":%d", cfg.Server.HTTPPort)
 	srv := &http.Server{

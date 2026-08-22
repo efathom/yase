@@ -4,12 +4,17 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/efathom/yase/pkg/auth"
 	"github.com/efathom/yase/pkg/index"
 )
 
 // SuggestProvider provides autocomplete suggestions.
+//
+// Suggestions are drawn from the indexed term dictionary, which spans every
+// tenant, so the filters argument is required to keep one tenant's terms —
+// customer names, internal identifiers — out of another tenant's completions.
 type SuggestProvider interface {
-	Suggest(prefix string, limit int) []index.Suggestion
+	Suggest(prefix string, limit int, filters map[string]string) []index.Suggestion
 }
 
 func (h *Handler) handleSuggest(w http.ResponseWriter, r *http.Request) {
@@ -36,7 +41,9 @@ func (h *Handler) handleSuggest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	suggestions := sp.Suggest(q, limit)
+	filters := auth.InjectTenantFilter(auth.FromContext(r.Context()), nil)
+
+	suggestions := sp.Suggest(q, limit, filters)
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"query":       q,
 		"suggestions": suggestions,

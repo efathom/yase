@@ -183,7 +183,7 @@ func TestCollectionSearchIntegration(t *testing.T) {
 
 	// Test 1: Search single collection "docs"
 	queryVec, _ := emb.Embed(ctx, "API")
-	results, err := searcher.SearchSingle(ctx, "docs", "API", queryVec, nil, 10)
+	results, err := searcher.SearchSingle(ctx, "", "docs", "API", queryVec, nil, 10)
 	require.NoError(t, err)
 	assert.NotEmpty(t, results)
 	for _, r := range results {
@@ -192,7 +192,7 @@ func TestCollectionSearchIntegration(t *testing.T) {
 
 	// Test 2: Search single collection "code"
 	queryVec, _ = emb.Embed(ctx, "func")
-	results, err = searcher.SearchSingle(ctx, "code", "func", queryVec, nil, 10)
+	results, err = searcher.SearchSingle(ctx, "", "code", "func", queryVec, nil, 10)
 	require.NoError(t, err)
 	assert.NotEmpty(t, results)
 	for _, r := range results {
@@ -201,7 +201,7 @@ func TestCollectionSearchIntegration(t *testing.T) {
 
 	// Test 3: Search _default
 	queryVec, _ = emb.Embed(ctx, "default")
-	results, err = searcher.SearchDefault(ctx, "default", queryVec, nil, 10)
+	results, err = searcher.SearchDefault(ctx, "", "default", queryVec, nil, 10)
 	require.NoError(t, err)
 	assert.NotEmpty(t, results)
 	for _, r := range results {
@@ -210,7 +210,7 @@ func TestCollectionSearchIntegration(t *testing.T) {
 
 	// Test 4: Cross-collection search (all)
 	queryVec, _ = emb.Embed(ctx, "content")
-	results, err = searcher.Search(ctx, nil, "content", queryVec, nil, 10)
+	results, err = searcher.Search(ctx, "", nil, "content", queryVec, nil, 10)
 	require.NoError(t, err)
 	// Should have results from multiple collections
 	collectionIDs := make(map[string]bool)
@@ -220,14 +220,14 @@ func TestCollectionSearchIntegration(t *testing.T) {
 	assert.True(t, len(collectionIDs) >= 1, "should have results from at least 1 collection")
 
 	// Test 5: Cross-collection search (subset)
-	results, err = searcher.Search(ctx, []string{"docs", "code"}, "implementation", queryVec, nil, 10)
+	results, err = searcher.Search(ctx, "", []string{"docs", "code"}, "implementation", queryVec, nil, 10)
 	require.NoError(t, err)
 	for _, r := range results {
 		assert.Contains(t, []string{"docs", "code"}, r.CollectionID)
 	}
 
 	// Test 6: Delete collection and verify search fails
-	require.NoError(t, mgr.Delete(ctx, "docs"))
-	_, err = searcher.SearchSingle(ctx, "docs", "API", queryVec, nil, 10)
+	require.NoError(t, mgr.Delete(ctx, "", "docs"))
+	_, err = searcher.SearchSingle(ctx, "", "docs", "API", queryVec, nil, 10)
 	assert.Error(t, err)
 }

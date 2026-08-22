@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+
+	"github.com/efathom/yase/pkg/auth"
 )
 
 type deleteRequest struct {
@@ -38,7 +40,11 @@ func (h *Handler) handleDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	count, err := ds.Delete(r.Context(), req.DocIDs)
+	// The tenant filter constrains which of the requested IDs may actually be
+	// removed — document IDs alone must not authorize a delete.
+	filters := auth.InjectTenantFilter(auth.FromContext(r.Context()), nil)
+
+	count, err := ds.Delete(r.Context(), req.DocIDs, filters)
 	if err != nil {
 		slog.Error("delete error", "error", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error during delete"})
@@ -71,7 +77,11 @@ func (h *Handler) handleDeleteByQuery(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	count, err := ds.DeleteByFilter(r.Context(), req.Filters)
+	// Force tenant scoping so a caller cannot delete another tenant's
+	// documents by supplying "_tenant" (or an over-broad filter) themselves.
+	filters := auth.InjectTenantFilter(auth.FromContext(r.Context()), req.Filters)
+
+	count, err := ds.DeleteByFilter(r.Context(), filters)
 	if err != nil {
 		slog.Error("delete-by-query error", "error", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error during delete"})

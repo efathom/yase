@@ -39,7 +39,7 @@ func TestCompactReclaimsSpace(t *testing.T) {
 	for i := 0; i < 100; i += 2 {
 		toDelete = append(toDelete, uint32(i))
 	}
-	if _, err := he.Delete(ctx, toDelete); err != nil {
+	if _, err := he.Delete(ctx, toDelete, nil); err != nil {
 		t.Fatalf("Delete: %v", err)
 	}
 

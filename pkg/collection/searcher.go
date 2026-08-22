@@ -31,13 +31,14 @@ type SearchResult struct {
 // Results are merged using Reciprocal Rank Fusion.
 func (s *Searcher) Search(
 	ctx context.Context,
+	callerTenant string,
 	collectionIDs []string,
 	textQuery string,
 	queryVec []float32,
 	filters map[string]string,
 	topK int,
 ) ([]SearchResult, error) {
-	engines := s.resolveEngines(collectionIDs)
+	engines := s.resolveEngines(callerTenant, collectionIDs)
 	if len(engines) == 0 {
 		return nil, fmt.Errorf("no collections found")
 	}
@@ -96,40 +97,32 @@ func (s *Searcher) Search(
 // SearchSingle searches a single collection by ID.
 func (s *Searcher) SearchSingle(
 	ctx context.Context,
+	callerTenant string,
 	collectionID string,
 	textQuery string,
 	queryVec []float32,
 	filters map[string]string,
 	topK int,
 ) ([]SearchResult, error) {
-	return s.Search(ctx, []string{collectionID}, textQuery, queryVec, filters, topK)
+	return s.Search(ctx, callerTenant, []string{collectionID}, textQuery, queryVec, filters, topK)
 }
 
 // SearchDefault searches the _default collection.
 func (s *Searcher) SearchDefault(
 	ctx context.Context,
+	callerTenant string,
 	textQuery string,
 	queryVec []float32,
 	filters map[string]string,
 	topK int,
 ) ([]SearchResult, error) {
-	return s.Search(ctx, []string{DefaultCollectionID}, textQuery, queryVec, filters, topK)
+	return s.Search(ctx, callerTenant, []string{DefaultCollectionID}, textQuery, queryVec, filters, topK)
 }
 
-// resolveEngines returns the engines for the given collection IDs.
-// If the list is empty, returns all engines.
-func (s *Searcher) resolveEngines(collectionIDs []string) map[string]*index.HybridEngine {
-	if len(collectionIDs) == 0 {
-		return s.Manager.AllEngines()
-	}
-
-	result := make(map[string]*index.HybridEngine, len(collectionIDs))
-	for _, id := range collectionIDs {
-		if eng, err := s.Manager.GetEngine(id); err == nil {
-			result[id] = eng
-		}
-	}
-	return result
+// resolveEngines returns the engines the caller's tenant may search.
+// If the list is empty, returns every engine that tenant owns.
+func (s *Searcher) resolveEngines(callerTenant string, collectionIDs []string) map[string]*index.HybridEngine {
+	return s.Manager.EnginesForTenant(callerTenant, collectionIDs)
 }
 
 // GetEmbedder returns the appropriate embedder for a collection search.

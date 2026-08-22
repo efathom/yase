@@ -66,12 +66,12 @@ func main() {
 
 	// Connect to IndexService gRPC server (hosted by the indexer)
 	indexAddr := fmt.Sprintf("%s:%d", cfg.Index.GRPCHost, cfg.Index.GRPCPort)
-	dialOpt, err := auth.ClientDialOption(cfg.TLS)
+	dialOpts, err := auth.ClientDialOptions(cfg.Auth, cfg.TLS)
 	if err != nil {
 		slog.Error("failed to configure TLS", "error", err)
 		os.Exit(1)
 	}
-	cc, err := grpc.NewClient(indexAddr, dialOpt)
+	cc, err := grpc.NewClient(indexAddr, dialOpts...)
 	if err != nil {
 		slog.Error("Failed to connect to IndexService", "addr", indexAddr, "error", err)
 		os.Exit(1)
@@ -97,9 +97,13 @@ func main() {
 	mux := http.NewServeMux()
 	handler.RegisterRoutes(mux)
 
-	// Build the HTTP middleware chain: recover → body limit → (auth → rate limit) → load shed.
-	var root http.Handler = gateway.Recover(mux)
-	root = gateway.BodyLimit(10 << 20)(root) // 10 MB request body cap
+	// Build the HTTP middleware chain. gateway.Chain owns the ordering — the
+	// rate limiter has to run after auth to see the tenant.
+	opts := gateway.ChainOptions{
+		BodyLimit:   10 << 20, // 10 MB request body cap
+		LoadShedder: auth.NewLoadShedder(100),
+		RateScope:   "search",
+	}
 
 	if cfg.Auth.Enabled {
 		authn, err := auth.NewFromConfig(cfg.Auth)
@@ -109,20 +113,19 @@ func main() {
 		}
 		if authn != nil {
 			handler.SetAuthEnabled(true)
-			root = auth.HTTPMiddleware(authn)(root)
+			opts.Authenticator = authn
 		}
 	}
 
 	if cfg.RateLimit.Enabled {
-		rl := auth.NewRateLimiter(auth.RateLimitConfig{
+		opts.RateLimiter = auth.NewRateLimiter(auth.RateLimitConfig{
 			Enabled:          cfg.RateLimit.Enabled,
 			DefaultSearchQPS: cfg.RateLimit.DefaultSearchQPS,
 			DefaultIngestRPS: cfg.RateLimit.DefaultIngestRPS,
 		})
-		root = rl.HTTPMiddleware("search")(root)
 	}
 
-	root = auth.NewLoadShedder(100).HTTPMiddleware(root)
+	root := gateway.Chain(mux, opts)
 
 	addr := fmt.Sprintf(":%d", cfg.Server.HTTPPort)
 	server := &http.Server{

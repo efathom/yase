@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"sync"
 	"sync/atomic"
 	"syscall"
 	"unsafe"
@@ -21,6 +22,8 @@ const (
 // The first 64 bytes are reserved for a header containing magic, version, and
 // the allocation offset watermark.
 type FileArena struct {
+	mu       sync.RWMutex
+	closed   bool
 	data     []byte
 	size     uint64
 	offset   atomic.Uint64
@@ -125,6 +128,12 @@ func (a *FileArena) AllocFloat32(vec []float32) (uint64, error) {
 		return 0, errors.New("cannot allocate zero-length vector")
 	}
 
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	if a.closed {
+		return 0, ErrArenaClosed
+	}
+
 	for {
 		old := a.offset.Load()
 		aligned := alignUp(old, 4)
@@ -141,10 +150,16 @@ func (a *FileArena) AllocFloat32(vec []float32) (uint64, error) {
 }
 
 // GetFloat32 returns a zero-copy view into the file-backed arena.
+// Panics if the read would exceed the arena bounds or the arena is closed.
 func (a *FileArena) GetFloat32(offset uint64, length int) []float32 {
-	end := offset + uint64(length)*4
-	if end > a.size || offset > a.size {
-		panic(fmt.Sprintf("file arena read out of bounds: offset=%d len=%d size=%d", offset, length, a.size))
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	if a.closed {
+		panic("file arena read after close")
+	}
+	checkBounds(offset, length, 4, a.size)
+	if length == 0 {
+		return nil
 	}
 	return unsafe.Slice((*float32)(unsafe.Pointer(&a.data[offset])), length)
 }
@@ -155,6 +170,13 @@ func (a *FileArena) AllocBytes(data []byte) (uint64, error) {
 	if byteLen == 0 {
 		return 0, errors.New("cannot allocate zero-length data")
 	}
+
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	if a.closed {
+		return 0, ErrArenaClosed
+	}
+
 	for {
 		old := a.offset.Load()
 		aligned := alignUp(old, 8)
@@ -170,10 +192,16 @@ func (a *FileArena) AllocBytes(data []byte) (uint64, error) {
 }
 
 // GetBytes returns a view into the file-backed arena at the given byte offset.
+// Panics if the read would exceed the arena bounds or the arena is closed.
 func (a *FileArena) GetBytes(offset uint64, length int) []byte {
-	end := offset + uint64(length)
-	if end > a.size || offset > a.size {
-		panic(fmt.Sprintf("file arena read out of bounds: offset=%d len=%d size=%d", offset, length, a.size))
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	if a.closed {
+		panic("file arena read after close")
+	}
+	checkBounds(offset, length, 1, a.size)
+	if length == 0 {
+		return nil
 	}
 	return a.data[offset : offset+uint64(length)]
 }
@@ -185,6 +213,16 @@ func (a *FileArena) UsedBytes() uint64 {
 
 // Sync flushes dirty pages to disk via msync.
 func (a *FileArena) Sync() error {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	if a.closed {
+		return ErrArenaClosed
+	}
+	return a.syncLocked()
+}
+
+// syncLocked is Sync without acquiring the lock. Callers must already hold mu.
+func (a *FileArena) syncLocked() error {
 	// Update offset watermark in header before sync
 	binary.LittleEndian.PutUint64(a.data[8:16], a.offset.Load())
 
@@ -199,15 +237,20 @@ func (a *FileArena) Sync() error {
 }
 
 // Close writes the offset watermark, syncs to disk, and releases the mmap.
+// It waits for in-flight reads and allocations, and is safe to call twice.
 func (a *FileArena) Close() error {
-	if a.data == nil {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	if a.closed {
 		return ErrArenaClosed
 	}
+	a.closed = true
 
 	// Write final offset to header
 	binary.LittleEndian.PutUint64(a.data[8:16], a.offset.Load())
 
-	syncErr := a.Sync()
+	syncErr := a.syncLocked()
 	unmapErr := syscall.Munmap(a.data)
 	closeErr := syscall.Close(a.fd)
 	a.data = nil

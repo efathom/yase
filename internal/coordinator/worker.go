@@ -32,7 +32,14 @@ type WorkerNode struct {
 	ID          string
 	MasterURL   string
 	RateLimiter *crawler.GlobalRateLimiter
-	HTTPClient  *http.Client
+	// HTTPClient fetches crawl targets. It carries the SSRF guard, so it must
+	// not be used for control-plane calls to the master.
+	HTTPClient *http.Client
+	// MasterClient talks to this worker's own master scheduler, which normally
+	// lives on a private or loopback address the crawl guard would refuse.
+	MasterClient *http.Client
+	// MasterToken is presented to the master API when it requires one.
+	MasterToken string
 	DNSCache    *crawler.DNSCache
 	JobQueue    chan string
 	ResultsChan chan<- CrawlResult
@@ -50,13 +57,31 @@ func NewWorkerNode(id, masterURL string, rl *crawler.GlobalRateLimiter, jobs cha
 		MasterURL:   masterURL,
 		RateLimiter: rl,
 		HTTPClient:  httpClient,
-		DNSCache:    dnsCache,
-		JobQueue:    jobs,
-		ResultsChan: results,
-		RateLimit:   1,
-		RateWindow:  time.Second,
-		MaxRetries:  3,
-		Heartbeat:   3 * time.Second,
+		// Plain client: the master is trusted infrastructure, not a crawl target.
+		MasterClient: &http.Client{Timeout: 15 * time.Second},
+		DNSCache:     dnsCache,
+		JobQueue:     jobs,
+		ResultsChan:  results,
+		RateLimit:    1,
+		RateWindow:   time.Second,
+		MaxRetries:   3,
+		Heartbeat:    3 * time.Second,
+	}
+}
+
+// masterClient returns the client used for control-plane calls, falling back
+// to HTTPClient for callers that constructed a WorkerNode directly.
+func (w *WorkerNode) masterClient() *http.Client {
+	if w.MasterClient != nil {
+		return w.MasterClient
+	}
+	return w.HTTPClient
+}
+
+// authorizeMaster attaches the shared master API token, when configured.
+func (w *WorkerNode) authorizeMaster(req *http.Request) {
+	if w.MasterToken != "" {
+		req.Header.Set("Authorization", "Bearer "+w.MasterToken)
 	}
 }
 
@@ -221,7 +246,8 @@ func (w *WorkerNode) sendHeartbeats(ctx context.Context) {
 			if err != nil {
 				continue
 			}
-			if resp, err := w.HTTPClient.Do(req); err == nil {
+			w.authorizeMaster(req)
+			if resp, err := w.masterClient().Do(req); err == nil {
 				resp.Body.Close()
 			}
 		}
@@ -238,13 +264,14 @@ func (w *WorkerNode) pollForURLs(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			return
-		case <-ticker.C:
+case <-ticker.C:
 			assignURL := fmt.Sprintf("%s/assign?worker_id=%s", w.MasterURL, w.ID)
 			req, err := http.NewRequestWithContext(ctx, "GET", assignURL, nil)
 			if err != nil {
 				continue
 			}
-			resp, err := w.HTTPClient.Do(req)
+			w.authorizeMaster(req)
+			resp, err := w.masterClient().Do(req)
 			if err != nil {
 				continue
 			}
@@ -275,7 +302,8 @@ func (w *WorkerNode) reportOutlinks(ctx context.Context, links []string) {
 		return
 	}
 	req.Header.Set("Content-Type", "application/json")
-	if resp, err := w.HTTPClient.Do(req); err == nil {
+	w.authorizeMaster(req)
+	if resp, err := w.masterClient().Do(req); err == nil {
 		resp.Body.Close()
 	}
 }

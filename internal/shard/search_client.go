@@ -15,25 +15,24 @@ import (
 // RemoteShardSearcher implements query.ShardSearcher by calling remote
 // cluster nodes via gRPC ShardSearchService.
 type RemoteShardSearcher struct {
-	mu      sync.RWMutex
-	conns   map[string]*grpc.ClientConn // nodeAddr → conn
-	nodes   map[uint32]string           // shardID → nodeAddr
-	dialOpt grpc.DialOption
+	mu       sync.RWMutex
+	conns    map[string]*grpc.ClientConn // nodeAddr → conn
+	nodes    map[uint32]string           // shardID → nodeAddr
+	dialOpts []grpc.DialOption
 }
 
 // NewRemoteShardSearcher creates a searcher that routes to remote shard nodes.
-// Optional grpc.DialOption(s) configure transport credentials (e.g. TLS).
+// Optional grpc.DialOption(s) configure transport credentials and per-RPC
+// credentials. All options are retained — keeping only the first would
+// silently drop the auth credentials alongside the transport option.
 func NewRemoteShardSearcher(opts ...grpc.DialOption) *RemoteShardSearcher {
-	var dialOpt grpc.DialOption
 	if len(opts) == 0 {
-		dialOpt = grpc.WithTransportCredentials(insecure.NewCredentials())
-	} else {
-		dialOpt = opts[0]
+		opts = []grpc.DialOption{grpc.WithTransportCredentials(insecure.NewCredentials())}
 	}
 	return &RemoteShardSearcher{
-		conns:   make(map[string]*grpc.ClientConn),
-		nodes:   make(map[uint32]string),
-		dialOpt: dialOpt,
+		conns:    make(map[string]*grpc.ClientConn),
+		nodes:    make(map[uint32]string),
+		dialOpts: opts,
 	}
 }
 
@@ -107,7 +106,7 @@ func (r *RemoteShardSearcher) getClient(addr string) (ingestionv1.ShardSearchSer
 		return ingestionv1.NewShardSearchServiceClient(conn), nil
 	}
 
-	conn, err := grpc.NewClient(addr, r.dialOpt)
+	conn, err := grpc.NewClient(addr, r.dialOpts...)
 	if err != nil {
 		return nil, err
 	}

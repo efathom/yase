@@ -3,6 +3,7 @@ package config
 import (
 	"errors"
 	"fmt"
+	"net"
 )
 
 // knownEmbedderProviders are the valid embedder.provider values.
@@ -16,6 +17,45 @@ var knownEmbedderProviders = map[string]bool{
 func validatePort(name string, port int, errs *[]error) {
 	if port <= 0 || port > 65535 {
 		*errs = append(*errs, fmt.Errorf("%s: invalid port %d", name, port))
+	}
+}
+
+// isLoopbackListenAddr reports whether addr binds only to the loopback
+// interface. An empty host (":9080") or 0.0.0.0 binds to every interface.
+func isLoopbackListenAddr(addr string) bool {
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		// No port given — treat the whole value as the host.
+		host = addr
+	}
+	if host == "" {
+		return false
+	}
+	if host == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
+}
+
+// validateCrawlerMaster ensures the master scheduler API is not exposed
+// without a shared secret. /seed and /discover inject crawl targets, so an
+// unauthenticated listener on a public interface lets anyone drive the crawler
+// at arbitrary URLs.
+func validateCrawlerMaster(c *Config, errs *[]error) {
+	if c.Crawler.MasterAddr == "" || isLoopbackListenAddr(c.Crawler.MasterAddr) {
+		return
+	}
+	const minTokenLen = 16
+	if c.Crawler.MasterToken == "" {
+		*errs = append(*errs, fmt.Errorf(
+			"crawler.master_token: required when crawler.master_addr (%q) is not loopback",
+			c.Crawler.MasterAddr))
+		return
+	}
+	if len(c.Crawler.MasterToken) < minTokenLen {
+		*errs = append(*errs, fmt.Errorf(
+			"crawler.master_token: must be at least %d characters", minTokenLen))
 	}
 }
 
@@ -90,6 +130,7 @@ func (c *Config) Validate() error {
 	if c.Crawler.MaxRetries < 0 {
 		errs = append(errs, fmt.Errorf("crawler.max_retries: must be >= 0"))
 	}
+	validateCrawlerMaster(c, &errs)
 
 	// TLS
 	if c.TLS.Enabled {

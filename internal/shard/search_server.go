@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/efathom/yase/pkg/auth"
 	"github.com/efathom/yase/pkg/index"
 	ingestionv1 "github.com/efathom/yase/proto/v1"
 )
@@ -64,7 +65,9 @@ func (s *SearchServer) SearchShard(ctx context.Context, req *ingestionv1.ShardSe
 		topK = 10
 	}
 
-	scored, err := engine.HybridSearch(ctx, req.Query, req.QueryVector, req.Filters, topK)
+	filters := auth.InjectTenantFilter(auth.FromContext(ctx), req.Filters)
+
+	scored, err := engine.HybridSearch(ctx, req.Query, req.QueryVector, filters, topK)
 	if err != nil {
 		return nil, fmt.Errorf("shard %d search: %w", req.ShardId, err)
 	}
