@@ -68,12 +68,12 @@ func main() {
 	}
 
 	// Remote shard searcher — routes queries to cluster nodes via gRPC
-	dialOpt, err := auth.ClientDialOption(cfg.TLS)
+	dialOpts, err := auth.ClientDialOptions(cfg.Auth, cfg.TLS)
 	if err != nil {
 		slog.Error("failed to configure TLS", "error", err)
 		os.Exit(1)
 	}
-	searcher := shard.NewRemoteShardSearcher(dialOpt)
+	searcher := shard.NewRemoteShardSearcher(dialOpts...)
 	defer searcher.Close()
 
 	// Topology sync — polls cluster node for shard→node mapping

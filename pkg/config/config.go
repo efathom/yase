@@ -125,6 +125,20 @@ type CrawlerConfig struct {
 	BlockedDomainsFile string        `mapstructure:"blocked_domains_file"` // one domain per line
 	MaxPages           int           `mapstructure:"max_pages"`
 	DNSTTL             time.Duration `mapstructure:"dns_ttl"`
+
+	// MasterAddr is the listen address for the master scheduler's HTTP API
+	// (/seed, /discover, /assign, /heartbeat). Defaults to loopback: these are
+	// management endpoints and must not be world-reachable.
+	MasterAddr string `mapstructure:"master_addr"`
+
+	// MasterToken is the shared secret workers and operators present to the
+	// master scheduler API. Required unless MasterAddr is loopback-only.
+	MasterToken string `mapstructure:"master_token"`
+
+	// AllowPrivateAddresses disables the crawler's SSRF guard, permitting
+	// fetches of private, loopback, and link-local addresses. Leave false
+	// unless deliberately crawling an internal network.
+	AllowPrivateAddresses bool `mapstructure:"allow_private_addresses"`
 }
 
 type MetricsConfig struct {
@@ -155,6 +169,12 @@ type AuthConfig struct {
 	Method  string         `mapstructure:"method"` // "api_key", "jwt", "none"
 	APIKeys []APIKeyConfig `mapstructure:"api_keys"`
 	JWT     JWTAuthConfig  `mapstructure:"jwt"`
+
+	// ClientToken is the credential this process presents when it calls
+	// another YASE service over gRPC (crawler→ingestion, gateway→shard,
+	// parser→PDF). Required when auth is enabled in a distributed
+	// deployment: without it the servers reject internal traffic.
+	ClientToken string `mapstructure:"client_token"`
 }
 
 type APIKeyConfig struct {
@@ -170,6 +190,15 @@ type JWTAuthConfig struct {
 	Audience    string `mapstructure:"audience"`
 	TenantClaim string `mapstructure:"tenant_claim"`
 	RolesClaim  string `mapstructure:"roles_claim"`
+
+	// DefaultRoles are granted to a token carrying no roles claim. Empty by
+	// default so such a token receives no authority.
+	DefaultRoles []string `mapstructure:"default_roles"`
+
+	// RequireTenant rejects tokens with no tenant claim. Enable it with
+	// multi-tenancy: an empty tenant yields a context the tenant filter
+	// cannot narrow.
+	RequireTenant bool `mapstructure:"require_tenant"`
 }
 
 type TLSConfig struct {
@@ -256,6 +285,8 @@ func Load(configPath string) (*Config, error) {
 	v.SetDefault("crawler.max_retries", 3)
 	v.SetDefault("crawler.max_pages", 0) // 0 = unlimited
 	v.SetDefault("crawler.dns_ttl", "5m")
+	v.SetDefault("crawler.master_addr", "127.0.0.1:9080")
+	v.SetDefault("crawler.allow_private_addresses", false)
 
 	// Reranker defaults
 	v.SetDefault("reranker.enabled", false)

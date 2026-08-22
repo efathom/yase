@@ -2,6 +2,7 @@ package auth
 
 import (
 	"context"
+	"crypto/sha256"
 	"crypto/subtle"
 	"fmt"
 	"sync"
@@ -17,16 +18,26 @@ type APIKeyEntry struct {
 }
 
 // APIKeyAuthenticator validates API keys against a configured set.
+//
+// Keys are held as SHA-256 digests rather than raw strings. Comparing
+// fixed-width digests keeps the comparison genuinely constant-time:
+// subtle.ConstantTimeCompare short-circuits when the two inputs differ in
+// length, so comparing raw keys would still leak the configured key length.
 type APIKeyAuthenticator struct {
 	mu   sync.RWMutex
-	keys map[string]*APIKeyEntry // key hash → entry
+	keys map[[sha256.Size]byte]*APIKeyEntry // key digest → entry
+}
+
+// keyDigest returns the SHA-256 digest of an API key.
+func keyDigest(key string) [sha256.Size]byte {
+	return sha256.Sum256([]byte(key))
 }
 
 // NewAPIKeyAuthenticator creates an authenticator from a list of API key entries.
 func NewAPIKeyAuthenticator(entries []APIKeyEntry) *APIKeyAuthenticator {
-	keys := make(map[string]*APIKeyEntry, len(entries))
+	keys := make(map[[sha256.Size]byte]*APIKeyEntry, len(entries))
 	for i := range entries {
-		keys[entries[i].Key] = &entries[i]
+		keys[keyDigest(entries[i].Key)] = &entries[i]
 	}
 	return &APIKeyAuthenticator{keys: keys}
 }
@@ -34,13 +45,15 @@ func NewAPIKeyAuthenticator(entries []APIKeyEntry) *APIKeyAuthenticator {
 // Authenticate validates the provided token against configured API keys.
 // Uses constant-time comparison to prevent timing attacks.
 func (a *APIKeyAuthenticator) Authenticate(_ context.Context, token string) (*AuthContext, error) {
+	tokenDigest := keyDigest(token)
+
 	a.mu.RLock()
 	defer a.mu.RUnlock()
 
 	// Always iterate ALL keys to prevent timing side-channels on key count/position
 	var matched *APIKeyEntry
-	for key, entry := range a.keys {
-		if subtle.ConstantTimeCompare([]byte(token), []byte(key)) == 1 {
+	for digest, entry := range a.keys {
+		if subtle.ConstantTimeCompare(tokenDigest[:], digest[:]) == 1 {
 			matched = entry
 		}
 	}
@@ -64,14 +77,14 @@ func (a *APIKeyAuthenticator) Authenticate(_ context.Context, token string) (*Au
 func (a *APIKeyAuthenticator) AddKey(entry APIKeyEntry) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	a.keys[entry.Key] = &entry
+	a.keys[keyDigest(entry.Key)] = &entry
 }
 
 // RemoveKey removes an API key.
 func (a *APIKeyAuthenticator) RemoveKey(key string) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	delete(a.keys, key)
+	delete(a.keys, keyDigest(key))
 }
 
 func scopesFromRoles(roles []string) []string {

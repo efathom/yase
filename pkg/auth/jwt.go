@@ -19,16 +19,27 @@ type JWTConfig struct {
 	Audience    string `json:"audience" yaml:"audience"`         // expected audience claim
 	TenantClaim string `json:"tenant_claim" yaml:"tenant_claim"` // JWT claim containing tenant ID (default "tenant_id")
 	RolesClaim  string `json:"roles_claim" yaml:"roles_claim"`   // JWT claim containing roles (default "roles")
+
+	// DefaultRoles are granted when the token carries no roles claim. Empty
+	// by default: a token that asserts no authority receives none.
+	DefaultRoles []string `json:"default_roles" yaml:"default_roles"`
+
+	// RequireTenant rejects tokens with no tenant claim. Enable it whenever
+	// multi-tenancy is in use — an empty tenant produces an unscoped context
+	// that the tenant filter cannot narrow.
+	RequireTenant bool `json:"require_tenant" yaml:"require_tenant"`
 }
 
 // JWTAuthenticator validates HS256 JWT tokens.
 // For production RS256/JWKS, extend with a JWKS fetcher.
 type JWTAuthenticator struct {
-	secret      []byte
-	issuer      string
-	audience    string
-	tenantClaim string
-	rolesClaim  string
+	secret        []byte
+	issuer        string
+	audience      string
+	tenantClaim   string
+	rolesClaim    string
+	defaultRoles  []string
+	requireTenant bool
 }
 
 // NewJWTAuthenticator creates a JWT authenticator.
@@ -42,12 +53,32 @@ func NewJWTAuthenticator(cfg JWTConfig) *JWTAuthenticator {
 		rolesClaim = "roles"
 	}
 	return &JWTAuthenticator{
-		secret:      []byte(cfg.Secret),
-		issuer:      cfg.Issuer,
-		audience:    cfg.Audience,
-		tenantClaim: tenantClaim,
-		rolesClaim:  rolesClaim,
+		secret:        []byte(cfg.Secret),
+		issuer:        cfg.Issuer,
+		audience:      cfg.Audience,
+		tenantClaim:   tenantClaim,
+		rolesClaim:    rolesClaim,
+		defaultRoles:  cfg.DefaultRoles,
+		requireTenant: cfg.RequireTenant,
 	}
+}
+
+// audienceMatches reports whether the "aud" claim satisfies want.
+//
+// RFC 7519 §4.1.3 permits either a single string or an array of strings;
+// identity providers commonly emit the array form for multi-audience tokens.
+func audienceMatches(claim any, want string) bool {
+	switch aud := claim.(type) {
+	case string:
+		return aud == want
+	case []any:
+		for _, v := range aud {
+			if s, ok := v.(string); ok && s == want {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // Authenticate validates a JWT token and extracts the auth context.
@@ -93,13 +124,11 @@ func (j *JWTAuthenticator) Authenticate(_ context.Context, token string) (*AuthC
 	// Validate standard claims
 	if j.issuer != "" {
 		if iss, _ := claims["iss"].(string); iss != j.issuer {
-			return nil, fmt.Errorf("invalid JWT issuer: got %q, want %q", iss, j.issuer)
+			return nil, fmt.Errorf("invalid JWT issuer")
 		}
 	}
-	if j.audience != "" {
-		if aud, _ := claims["aud"].(string); aud != j.audience {
-			return nil, fmt.Errorf("invalid JWT audience: got %q, want %q", aud, j.audience)
-		}
+	if j.audience != "" && !audienceMatches(claims["aud"], j.audience) {
+		return nil, fmt.Errorf("invalid JWT audience")
 	}
 
 	now := time.Now().Unix()
@@ -121,6 +150,9 @@ func (j *JWTAuthenticator) Authenticate(_ context.Context, token string) (*AuthC
 
 	// Extract custom claims
 	tenantID, _ := claims[j.tenantClaim].(string)
+	if j.requireTenant && tenantID == "" {
+		return nil, fmt.Errorf("JWT missing required tenant claim %q", j.tenantClaim)
+	}
 	userID, _ := claims["sub"].(string)
 
 	var roles []string
@@ -135,8 +167,11 @@ func (j *JWTAuthenticator) Authenticate(_ context.Context, token string) (*AuthC
 		roles = strings.Split(r, ",")
 	}
 
+	// A token that asserts no roles gets only what the deployment configured
+	// as a default — empty unless set, so the fallback cannot silently grant
+	// read access.
 	if len(roles) == 0 {
-		roles = []string{"reader"}
+		roles = j.defaultRoles
 	}
 
 	return &AuthContext{

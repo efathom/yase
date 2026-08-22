@@ -35,8 +35,29 @@ jobs:
       - name: Build
         run: make build-all
 
-      - name: Unit tests
-        run: go test ./... -short -count=1
+      # -race is the project's pre-commit gate and matters here: the code
+      # leans on a lock-free arena allocator, atomic entry points, and
+      # concurrent HNSW insertion. With -short it costs well under a minute.
+      - name: Unit tests (race)
+        run: go test -race ./... -short -count=1
+
+  slow-tests:
+    name: Full test suite
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version: "1.26"
+          cache: true
+
+      # The non-short tiers, including the 10K-node HNSW structure test.
+      # Kept out of the main job so the fast gate stays fast.
+      - name: Unit tests (full)
+        env:
+          YASE_SLOW_TESTS: "1"
+        run: go test ./pkg/... ./internal/... ./client/... -count=1
 
   lint:
     name: Lint

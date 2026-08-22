@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/efathom/yase/pkg/auth"
 	"github.com/efathom/yase/pkg/index"
 )
 
@@ -69,8 +70,10 @@ func (h *Handler) handleRAG(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Hybrid search
-	scored, err := h.Searcher.HybridSearch(r.Context(), req.Query, queryVec, req.Filters, req.TopK)
+	// Hybrid search — tenant scoping is forced here and cannot be overridden
+	// by req.Filters, since RAG returns raw document text.
+	filters := auth.InjectTenantFilter(auth.FromContext(r.Context()), req.Filters)
+	scored, err := h.Searcher.HybridSearch(r.Context(), req.Query, queryVec, filters, req.TopK)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, RAGResponse{Status: "error: search failed"})
 		return

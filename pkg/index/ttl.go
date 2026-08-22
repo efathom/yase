@@ -90,7 +90,7 @@ func (he *HybridEngine) sweepExpired(ctx context.Context, defaultTTL time.Durati
 		return 0
 	}
 
-	deleted, err := he.Delete(ctx, expiredIDs)
+	deleted, err := he.Delete(ctx, expiredIDs, nil)
 	if err != nil {
 		slog.Error("ttl delete error", "error", err)
 	}

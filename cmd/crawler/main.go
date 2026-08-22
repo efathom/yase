@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/efathom/yase/internal/coordinator"
 	"github.com/efathom/yase/internal/glue"
@@ -139,6 +140,7 @@ func runMaster(ctx context.Context, cfg *config.Config, rdb *redis.Client) {
 
 	master := coordinator.NewMasterScheduler(bloom, frontierQueue, buildDomainFilter(cfg))
 	master.MaxPages = cfg.Crawler.MaxPages
+	master.APIToken = cfg.Crawler.MasterToken
 
 	// Start HTTP heartbeat + assignment + seed server
 	mux := http.NewServeMux()
@@ -147,10 +149,23 @@ func runMaster(ctx context.Context, cfg *config.Config, rdb *redis.Client) {
 	mux.HandleFunc("/seed", master.SeedHandler)
 	mux.HandleFunc("/discover", master.DiscoverHandler)
 
-	addr := ":9080"
+	// Defaults to loopback: /seed and /discover inject crawl targets, so this
+	// is a management API, not a public one.
+	addr := cfg.Crawler.MasterAddr
+	if addr == "" {
+		addr = "127.0.0.1:9080"
+	}
+	srv := &http.Server{
+		Addr:              addr,
+		Handler:           mux,
+		ReadTimeout:       15 * time.Second,
+		ReadHeaderTimeout: 5 * time.Second,
+		WriteTimeout:      30 * time.Second,
+		IdleTimeout:       60 * time.Second,
+	}
 	go func() {
-		slog.Info("Master scheduler HTTP API", "addr", addr)
-		if err := http.ListenAndServe(addr, mux); err != nil {
+		slog.Info("Master scheduler HTTP API", "addr", addr, "authenticated", cfg.Crawler.MasterToken != "")
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			slog.Error("Master HTTP error", "error", err)
 		}
 	}()
@@ -166,6 +181,10 @@ func runWorker(ctx context.Context, cfg *config.Config, rdb *redis.Client, worke
 	results := make(chan coordinator.CrawlResult, 100)
 
 	worker := coordinator.NewWorkerNode(workerID, masterURL, rl, jobs, results)
+	worker.MasterToken = cfg.Crawler.MasterToken
+	if worker.DNSCache != nil {
+		worker.DNSCache.AllowPrivateAddresses = cfg.Crawler.AllowPrivateAddresses
+	}
 	worker.RateLimit = cfg.Crawler.RatePerDomain
 	worker.RateWindow = cfg.Crawler.RateWindow
 	worker.MaxRetries = cfg.Crawler.MaxRetries
@@ -175,12 +194,12 @@ func runWorker(ctx context.Context, cfg *config.Config, rdb *redis.Client, worke
 
 	// Stream results to ingestion service
 	ingestionAddr := fmt.Sprintf("%s:%d", cfg.Server.GRPCHost, cfg.Server.GRPCPort)
-	dialOpt, err := auth.ClientDialOption(cfg.TLS)
+	dialOpts, err := auth.ClientDialOptions(cfg.Auth, cfg.TLS)
 	if err != nil {
 		slog.Error("failed to configure TLS", "error", err)
 		return
 	}
-	pool, err := client.NewConnectionPool(ingestionAddr, 4, dialOpt)
+	pool, err := client.NewConnectionPool(ingestionAddr, 4, dialOpts...)
 	if err != nil {
 		slog.Warn("could not connect to ingestion service", "error", err)
 		return

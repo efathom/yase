@@ -83,7 +83,11 @@ func UnaryServerInterceptor(auth Authenticator) grpc.UnaryServerInterceptor {
 		}
 		ac, err := auth.Authenticate(ctx, token)
 		if err != nil {
-			return nil, status.Errorf(codes.Unauthenticated, "invalid credentials: %v", err)
+			// Log the reason; return a fixed message. The underlying error
+			// names the expected issuer and audience, which would otherwise
+			// go straight back to an unauthenticated caller.
+			slog.Warn("auth: gRPC authentication failed", "method", info.FullMethod, "error", err)
+			return nil, status.Error(codes.Unauthenticated, "invalid credentials")
 		}
 		return handler(WithContext(ctx, ac), req)
 	}
@@ -98,7 +102,8 @@ func StreamServerInterceptor(auth Authenticator) grpc.StreamServerInterceptor {
 		}
 		ac, err := auth.Authenticate(ss.Context(), token)
 		if err != nil {
-			return status.Errorf(codes.Unauthenticated, "invalid credentials: %v", err)
+			slog.Warn("auth: gRPC stream authentication failed", "method", info.FullMethod, "error", err)
+			return status.Error(codes.Unauthenticated, "invalid credentials")
 		}
 		wrapped := &authServerStream{ServerStream: ss, ctx: WithContext(ss.Context(), ac)}
 		return handler(srv, wrapped)

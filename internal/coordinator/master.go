@@ -2,7 +2,9 @@ package coordinator
 
 import (
 	"context"
+	"crypto/subtle"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -141,6 +143,55 @@ type MasterScheduler struct {
 	DomainFilter  *DomainFilter
 	MaxPages      int          // 0 = unlimited
 	enqueued      atomic.Int64 // total URLs enqueued to frontier
+
+	// APIToken is the shared secret callers must present as
+	// "Authorization: Bearer <token>" or "X-API-Key: <token>". Empty leaves
+	// the API open, which is only safe when it is bound to loopback.
+	APIToken string
+}
+
+// maxSeedBodyBytes caps the JSON body accepted by /seed and /discover.
+const maxSeedBodyBytes = 4 << 20 // 4 MB
+
+// authorized reports whether the request carries the configured API token.
+// Always true when no token is configured.
+func (ms *MasterScheduler) authorized(r *http.Request) bool {
+	if ms.APIToken == "" {
+		return true
+	}
+	presented := ""
+	if h := r.Header.Get("Authorization"); strings.HasPrefix(h, "Bearer ") {
+		presented = strings.TrimPrefix(h, "Bearer ")
+	} else if k := r.Header.Get("X-API-Key"); k != "" {
+		presented = k
+	}
+	return subtle.ConstantTimeCompare([]byte(presented), []byte(ms.APIToken)) == 1
+}
+
+// decodeURLList applies the auth check and body cap shared by /seed and
+// /discover, returning false when it has already written a response.
+func (ms *MasterScheduler) decodeURLList(w http.ResponseWriter, r *http.Request) ([]string, bool) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "POST only", http.StatusMethodNotAllowed)
+		return nil, false
+	}
+	if !ms.authorized(r) {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return nil, false
+	}
+
+	limited := http.MaxBytesReader(w, r.Body, maxSeedBodyBytes)
+	var urls []string
+	if err := json.NewDecoder(limited).Decode(&urls); err != nil {
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) {
+			http.Error(w, "request body too large", http.StatusRequestEntityTooLarge)
+			return nil, false
+		}
+		http.Error(w, "bad JSON: "+err.Error(), http.StatusBadRequest)
+		return nil, false
+	}
+	return urls, true
 }
 
 // NewMasterScheduler creates a master scheduler with the given Bloom filter
@@ -325,14 +376,8 @@ done:
 // SeedHandler accepts POST requests with a JSON array of seed URLs,
 // deduplicates them via the Bloom filter, and enqueues new ones to the frontier.
 func (ms *MasterScheduler) SeedHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "POST only", http.StatusMethodNotAllowed)
-		return
-	}
-
-	var urls []string
-	if err := json.NewDecoder(r.Body).Decode(&urls); err != nil {
-		http.Error(w, "bad JSON: "+err.Error(), http.StatusBadRequest)
+	urls, ok := ms.decodeURLList(w, r)
+	if !ok {
 		return
 	}
 
@@ -370,14 +415,8 @@ func (ms *MasterScheduler) SeedHandler(w http.ResponseWriter, r *http.Request) {
 // DiscoverHandler accepts POST with discovered outlinks from a worker,
 // deduplicates via Bloom filter, and enqueues new ones.
 func (ms *MasterScheduler) DiscoverHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "POST only", http.StatusMethodNotAllowed)
-		return
-	}
-
-	var links []string
-	if err := json.NewDecoder(r.Body).Decode(&links); err != nil {
-		http.Error(w, "bad JSON: "+err.Error(), http.StatusBadRequest)
+	links, ok := ms.decodeURLList(w, r)
+	if !ok {
 		return
 	}
 

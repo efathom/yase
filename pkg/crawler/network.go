@@ -2,6 +2,7 @@ package crawler
 
 import (
 	"context"
+	"fmt"
 	"net"
 	"net/http"
 	"sync"
@@ -22,6 +23,12 @@ type DNSCache struct {
 	stopCh chan struct{}
 	once   sync.Once
 	dialer net.Dialer
+
+	// AllowPrivateAddresses disables the SSRF guard. Leave it false unless the
+	// deployment genuinely crawls an internal network; with it set, any URL
+	// reaching the frontier can pull cloud metadata or loopback services into
+	// the index.
+	AllowPrivateAddresses bool
 }
 
 // NewDNSCache creates a DNS cache with the given TTL per entry.
@@ -66,6 +73,11 @@ func (d *DNSCache) Close() {
 
 // customDialContext resolves hostnames through the cache before dialing.
 // On cache miss or expired entry, performs an upstream DNS query and stores the result.
+//
+// The SSRF guard runs here, on the resolved address, immediately before the
+// connection is made. That placement matters: checking the URL earlier would
+// miss a redirect to an internal host, a hostname whose DNS record points at
+// one, and a raw-IP URL alike.
 func (d *DNSCache) customDialContext(ctx context.Context, network, addr string) (net.Conn, error) {
 	host, port, err := net.SplitHostPort(addr)
 	if err != nil {
@@ -83,6 +95,23 @@ func (d *DNSCache) customDialContext(ctx context.Context, network, addr string) 
 		}
 	} else {
 		addr = d.resolve(ctx, host, port, addr)
+	}
+
+	if !d.AllowPrivateAddresses {
+		dialHost, _, splitErr := net.SplitHostPort(addr)
+		if splitErr != nil {
+			return nil, splitErr
+		}
+		ip := net.ParseIP(dialHost)
+		if ip == nil {
+			// Resolution failed and the fallback address is still a hostname;
+			// refuse rather than let the system resolver pick an address the
+			// guard never inspected.
+			return nil, fmt.Errorf("%w: %q did not resolve to an IP", ErrBlockedAddress, dialHost)
+		}
+		if IsBlockedAddress(ip) {
+			return nil, fmt.Errorf("%w: %s", ErrBlockedAddress, ip)
+		}
 	}
 
 	return d.dialer.DialContext(ctx, network, addr)

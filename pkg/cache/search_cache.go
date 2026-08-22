@@ -8,7 +8,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"sort"
-	"strings"
+	"strconv"
 	"sync"
 	"time"
 
@@ -121,21 +121,30 @@ func (c *SearchCache) Invalidate() {
 }
 
 func (c *SearchCache) cacheKey(query string, filters map[string]string, topK int) string {
-	// Deterministic key from collection + query + sorted filters + topK
-	var parts []string
-	parts = append(parts, c.collectionID)
-	parts = append(parts, query)
-	parts = append(parts, fmt.Sprintf("k=%d", topK))
+	// Deterministic key from collection + query + sorted filters + topK.
+	//
+	// Each part is length-prefixed rather than joined on a separator: a filter
+	// value containing the separator could otherwise reproduce a different
+	// key's serialization and read back another entry's results.
+	h := sha256.New()
+	writePart := func(s string) {
+		_, _ = fmt.Fprintf(h, "%d:%s", len(s), s)
+	}
+
+	writePart(c.collectionID)
+	writePart(query)
+	writePart(strconv.Itoa(topK))
 
 	keys := make([]string, 0, len(filters))
 	for k := range filters {
 		keys = append(keys, k)
 	}
 	sort.Strings(keys)
+	writePart(strconv.Itoa(len(keys)))
 	for _, k := range keys {
-		parts = append(parts, k+"="+filters[k])
+		writePart(k)
+		writePart(filters[k])
 	}
 
-	h := sha256.Sum256([]byte(strings.Join(parts, "|")))
-	return hex.EncodeToString(h[:16])
+	return hex.EncodeToString(h.Sum(nil)[:16])
 }

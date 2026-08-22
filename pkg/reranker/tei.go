@@ -116,8 +116,22 @@ func (r *TEIReranker) Rerank(ctx context.Context, query string, texts []string) 
 			return nil, fmt.Errorf("unmarshal: %w", err)
 		}
 
+		// The caller uses Index to reindex its own candidate slice, so a
+		// malformed response must be rejected here rather than panicking
+		// upstream. Require an exact permutation of the inputs.
+		if len(items) != len(texts) {
+			return nil, fmt.Errorf("rerank response covers %d of %d documents", len(items), len(texts))
+		}
+		seen := make([]bool, len(texts))
 		results := make([]RerankResult, len(items))
 		for i, item := range items {
+			if item.Index < 0 || item.Index >= len(texts) {
+				return nil, fmt.Errorf("rerank response index %d out of range [0,%d)", item.Index, len(texts))
+			}
+			if seen[item.Index] {
+				return nil, fmt.Errorf("rerank response repeats index %d", item.Index)
+			}
+			seen[item.Index] = true
 			results[i] = RerankResult{Index: item.Index, Score: item.Score}
 		}
 		return results, nil

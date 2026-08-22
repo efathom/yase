@@ -28,6 +28,13 @@ DATA_DIR="/tmp/yase-dist-e2e"
 MAX_PAGES="${1:-10}"
 SEED_URL="${2:-https://go.dev/}"
 CRAWL_WAIT="${CRAWL_WAIT:-60}"
+# Embedder provider: 'mock' (no external deps, default) or 'tei'
+# (requires a TEI server on :8888, e.g. docker compose up -d tei)
+EMBEDDER_PROVIDER="${EMBEDDER_PROVIDER:-mock}"
+# Crawler worker concurrency. The default (2000) races the per-domain rate
+# limit (1 req/s) and silently drops most URLs, starving the pipeline. A small
+# value lets the crawler actually deliver MaxPages records.
+CRAWLER_MAX_WORKERS="${CRAWLER_MAX_WORKERS:-2}"
 NUM_PARTITIONS=6
 
 PASS=0
@@ -69,6 +76,7 @@ sleep 1
 echo "================================================================"
 echo "  YASE 3-Node Distributed Cluster E2E"
 echo "  Nodes: 3   Partitions: $NUM_PARTITIONS   MaxPages: $MAX_PAGES"
+echo "  Embedder: $EMBEDDER_PROVIDER   CrawlerWorkers: $CRAWLER_MAX_WORKERS"
 echo "================================================================"
 echo ""
 
@@ -102,7 +110,7 @@ echo ""
 # Step 2: Ingestion
 # ══════════════════════════════════════════
 echo "--- Step 2: Ingestion (:50051) ---"
-YASE_EMBEDDER_PROVIDER=tei \
+YASE_EMBEDDER_PROVIDER=$EMBEDDER_PROVIDER \
   YASE_KAFKA_PARTITIONS=$NUM_PARTITIONS \
   "$BIN_DIR/ingestion" > "$LOG_DIR/ingestion.log" 2>&1 &
 PIDS="$!"
@@ -131,7 +139,7 @@ YASE_CLUSTER_NODE_ID=node-0 \
   YASE_CLUSTER_SHARD_PORT=50053 \
   YASE_INDEX_PATH="$DATA_DIR/index-0" \
   YASE_INDEX_ARENA_SIZE_BYTES=104857600 \
-  YASE_EMBEDDER_PROVIDER=tei \
+  YASE_EMBEDDER_PROVIDER=$EMBEDDER_PROVIDER \
   YASE_EMBEDDER_DIMENSION=768 \
   YASE_KAFKA_GROUP_ID=$SHARED_GROUP \
   YASE_METRICS_ADDR=:9200 \
@@ -154,7 +162,7 @@ YASE_CLUSTER_NODE_ID=node-1 \
   YASE_CLUSTER_SHARD_PORT=50054 \
   YASE_INDEX_PATH="$DATA_DIR/index-1" \
   YASE_INDEX_ARENA_SIZE_BYTES=104857600 \
-  YASE_EMBEDDER_PROVIDER=tei \
+  YASE_EMBEDDER_PROVIDER=$EMBEDDER_PROVIDER \
   YASE_EMBEDDER_DIMENSION=768 \
   YASE_KAFKA_GROUP_ID=$SHARED_GROUP \
   YASE_METRICS_ADDR=:9201 \
@@ -178,7 +186,7 @@ YASE_CLUSTER_NODE_ID=node-2 \
   YASE_CLUSTER_SHARD_PORT=50055 \
   YASE_INDEX_PATH="$DATA_DIR/index-2" \
   YASE_INDEX_ARENA_SIZE_BYTES=104857600 \
-  YASE_EMBEDDER_PROVIDER=tei \
+  YASE_EMBEDDER_PROVIDER=$EMBEDDER_PROVIDER \
   YASE_EMBEDDER_DIMENSION=768 \
   YASE_KAFKA_GROUP_ID=$SHARED_GROUP \
   YASE_METRICS_ADDR=:9202 \
@@ -226,7 +234,7 @@ echo ""
 # Step 5: Distributed gateway
 # ══════════════════════════════════════════
 echo "--- Step 5: Dist-gateway (:8001) ---"
-YASE_EMBEDDER_PROVIDER=tei \
+YASE_EMBEDDER_PROVIDER=$EMBEDDER_PROVIDER \
   YASE_EMBEDDER_DIMENSION=768 \
   YASE_METRICS_ADDR=:9203 \
   "$BIN_DIR/dist-gateway" --cluster-http http://localhost:9100 --http-port 8001 \
@@ -247,12 +255,13 @@ echo ""
 echo "--- Step 6: Crawler (MaxPages=$MAX_PAGES) ---"
 
 YASE_CRAWLER_MAX_PAGES="$MAX_PAGES" \
-  YASE_EMBEDDER_PROVIDER=tei \
+  YASE_EMBEDDER_PROVIDER=$EMBEDDER_PROVIDER \
   YASE_METRICS_ADDR=:9204 \
   "$BIN_DIR/crawler" -mode master > "$LOG_DIR/crawler-master.log" 2>&1 &
 PIDS="$PIDS $!"
 
-YASE_EMBEDDER_PROVIDER=tei \
+YASE_CRAWLER_MAX_WORKERS=$CRAWLER_MAX_WORKERS \
+  YASE_EMBEDDER_PROVIDER=$EMBEDDER_PROVIDER \
   YASE_METRICS_ADDR=:9205 \
   "$BIN_DIR/crawler" -mode worker -id worker-001 -master http://localhost:9080 \
   > "$LOG_DIR/crawler-worker.log" 2>&1 &

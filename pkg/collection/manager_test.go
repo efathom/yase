@@ -37,7 +37,7 @@ func TestRestoreAll_CreatesDefault(t *testing.T) {
 	err := m.RestoreAll(ctx)
 	require.NoError(t, err)
 
-	c, err := m.Get(ctx, DefaultCollectionID)
+	c, err := m.Get(ctx, "", DefaultCollectionID)
 	require.NoError(t, err)
 	assert.Equal(t, DefaultCollectionID, c.ID)
 	assert.Equal(t, StatusReady, c.Status)
@@ -134,10 +134,10 @@ func TestDelete(t *testing.T) {
 	_, err := m.Create(ctx, "t1", "to-delete", "Ephemeral", CollectionConfig{})
 	require.NoError(t, err)
 
-	err = m.Delete(ctx, "to-delete")
+	err = m.Delete(ctx, "", "to-delete")
 	require.NoError(t, err)
 
-	_, err = m.Get(ctx, "to-delete")
+	_, err = m.Get(ctx, "", "to-delete")
 	assert.Error(t, err)
 
 	_, err = m.GetEngine("to-delete")
@@ -151,7 +151,7 @@ func TestDelete_DefaultForbidden(t *testing.T) {
 
 	require.NoError(t, m.RestoreAll(ctx))
 
-	err := m.Delete(ctx, DefaultCollectionID)
+	err := m.Delete(ctx, "", DefaultCollectionID)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "cannot delete")
 }
@@ -191,13 +191,13 @@ func TestUpdate(t *testing.T) {
 	_, err := m.Create(ctx, "", "upd", "Original", CollectionConfig{})
 	require.NoError(t, err)
 
-	updated, err := m.Update(ctx, "upd", "Renamed", "A description")
+	updated, err := m.Update(ctx, "", "upd", "Renamed", "A description")
 	require.NoError(t, err)
 	assert.Equal(t, "Renamed", updated.Name)
 	assert.Equal(t, "A description", updated.Description)
 
 	// Verify persisted
-	got, err := m.Get(ctx, "upd")
+	got, err := m.Get(ctx, "", "upd")
 	require.NoError(t, err)
 	assert.Equal(t, "Renamed", got.Name)
 }
@@ -211,24 +211,24 @@ func TestBindUnbindConnector(t *testing.T) {
 	require.NoError(t, err)
 
 	// Bind
-	err = m.BindConnector(ctx, "bind-test", "conn-1")
+	err = m.BindConnector(ctx, "", "bind-test", "conn-1")
 	require.NoError(t, err)
-	err = m.BindConnector(ctx, "bind-test", "conn-2")
+	err = m.BindConnector(ctx, "", "bind-test", "conn-2")
 	require.NoError(t, err)
 
-	c, _ := m.Get(ctx, "bind-test")
+	c, _ := m.Get(ctx, "", "bind-test")
 	assert.Equal(t, []string{"conn-1", "conn-2"}, c.Connectors)
 
 	// Duplicate bind is idempotent
-	err = m.BindConnector(ctx, "bind-test", "conn-1")
+	err = m.BindConnector(ctx, "", "bind-test", "conn-1")
 	require.NoError(t, err)
-	c, _ = m.Get(ctx, "bind-test")
+	c, _ = m.Get(ctx, "", "bind-test")
 	assert.Len(t, c.Connectors, 2)
 
 	// Unbind
-	err = m.UnbindConnector(ctx, "bind-test", "conn-1")
+	err = m.UnbindConnector(ctx, "", "bind-test", "conn-1")
 	require.NoError(t, err)
-	c, _ = m.Get(ctx, "bind-test")
+	c, _ = m.Get(ctx, "", "bind-test")
 	assert.Equal(t, []string{"conn-2"}, c.Connectors)
 }
 
@@ -271,13 +271,13 @@ func TestRestoreAll_ReloadsPersistedCollections(t *testing.T) {
 
 	require.NoError(t, m2.RestoreAll(ctx))
 
-	c, err := m2.Get(ctx, "persist-me")
+	c, err := m2.Get(ctx, "", "persist-me")
 	require.NoError(t, err)
 	assert.Equal(t, "Persistent", c.Name)
 	assert.Equal(t, StatusReady, c.Status)
 
 	// _default should also exist
-	_, err = m2.Get(ctx, DefaultCollectionID)
+	_, err = m2.Get(ctx, "", DefaultCollectionID)
 	require.NoError(t, err)
 
 	eng, err := m2.GetEngine("persist-me")
@@ -289,7 +289,7 @@ func TestGet_NotFound(t *testing.T) {
 	m := setupManager(t)
 	ctx := context.Background()
 
-	_, err := m.Get(ctx, "nonexistent")
+	_, err := m.Get(ctx, "", "nonexistent")
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "not found")
 }
@@ -298,7 +298,7 @@ func TestDelete_NotFound(t *testing.T) {
 	m := setupManager(t)
 	ctx := context.Background()
 
-	err := m.Delete(ctx, "nonexistent")
+	err := m.Delete(ctx, "", "nonexistent")
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "not found")
 }

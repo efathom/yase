@@ -209,13 +209,46 @@ func (he *HybridEngine) InvertedFileStats() (centroids int, leaves int) {
 }
 
 // Delete removes documents from the Bluge index and inverted files by their IDs.
+//
+// When filters is non-empty, an ID is only removed if the stored document also
+// matches those filters. This is what keeps tenant scoping enforceable on the
+// delete-by-ID path: knowing another tenant's document IDs is not sufficient to
+// delete them. Pass nil for an unconstrained delete (single-tenant callers and
+// internal compaction).
+//
 // Note: HNSW graph nodes are not physically removed (tombstoned) — they are excluded
 // from results because the Bluge pre-filter stage will no longer return them.
-func (he *HybridEngine) Delete(ctx context.Context, docIDs []uint32) (int, error) {
+func (he *HybridEngine) Delete(ctx context.Context, docIDs []uint32, filters map[string]string) (int, error) {
 	he.lifecycleMu.RLock()
 	defer he.lifecycleMu.RUnlock()
 	if he.closed.Load() {
 		return 0, ErrEngineClosed
+	}
+
+	// Narrow the requested IDs to those actually matching the filters.
+	if len(filters) > 0 {
+		allowed, err := he.BlugeStore.SearchFiltered(ctx, filters, deleteFilterLimit)
+		if err != nil {
+			return 0, fmt.Errorf("resolve delete filter: %w", err)
+		}
+		permitted := make([]uint32, 0, len(docIDs))
+		for _, id := range docIDs {
+			if allowed[id] {
+				permitted = append(permitted, id)
+			}
+		}
+		docIDs = permitted
+	}
+
+	return he.deleteLocked(ctx, docIDs)
+}
+
+// deleteLocked performs the removal itself. Callers must already hold
+// lifecycleMu and have checked the closed flag — sync.RWMutex read locks are
+// not reentrant, so re-acquiring here would deadlock against a pending Close.
+func (he *HybridEngine) deleteLocked(_ context.Context, docIDs []uint32) (int, error) {
+	if len(docIDs) == 0 {
+		return 0, nil
 	}
 
 	deleted := 0
@@ -255,6 +288,10 @@ func (he *HybridEngine) Delete(ctx context.Context, docIDs []uint32) (int, error
 	return deleted, nil
 }
 
+// deleteFilterLimit bounds how many documents a single filtered delete may
+// resolve. It matches the ceiling used by the search pre-filter stage.
+const deleteFilterLimit = 1000000
+
 // DeleteByFilter removes documents matching the given metadata filters.
 func (he *HybridEngine) DeleteByFilter(ctx context.Context, filters map[string]string) (int, error) {
 	he.lifecycleMu.RLock()
@@ -263,14 +300,15 @@ func (he *HybridEngine) DeleteByFilter(ctx context.Context, filters map[string]s
 		return 0, ErrEngineClosed
 	}
 
-	// Find matching doc IDs via Bluge search
-	scores, err := he.BlugeStore.SearchWithScores(ctx, "", filters, 100000)
+	// Resolve matching doc IDs with a filter-only query. SearchWithScores would
+	// rank by BM25 against an empty query, which is not a membership test.
+	matching, err := he.BlugeStore.SearchFiltered(ctx, filters, deleteFilterLimit)
 	if err != nil {
 		return 0, fmt.Errorf("search for delete: %w", err)
 	}
 
-	docIDs := make([]uint32, 0, len(scores))
-	for id := range scores {
+	docIDs := make([]uint32, 0, len(matching))
+	for id := range matching {
 		docIDs = append(docIDs, id)
 	}
 
@@ -278,7 +316,8 @@ func (he *HybridEngine) DeleteByFilter(ctx context.Context, filters map[string]s
 		return 0, nil
 	}
 
-	return he.Delete(ctx, docIDs)
+	// Already narrowed to the filter — no need to re-resolve it in Delete.
+	return he.deleteLocked(ctx, docIDs)
 }
 
 // Close releases all resources. It waits for in-flight operations to complete

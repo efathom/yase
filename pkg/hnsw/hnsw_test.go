@@ -3,6 +3,7 @@ package hnsw
 import (
 	"math"
 	"math/rand"
+	"os"
 	"sort"
 	"sync"
 	"testing"
@@ -185,10 +186,18 @@ func TestConcurrentInsertSearch(t *testing.T) {
 
 func TestMultiLayerStructure(t *testing.T) {
 	if testing.Short() {
-		t.Skip("skipping 10K test in short mode")
+		t.Skip("skipping multi-layer structure test in short mode")
 	}
 
-	n := 10000
+	// Building the graph dominates this package's runtime, and the race
+	// detector multiplies it by roughly fifteen. 2K nodes exercise the same
+	// layer-assignment invariants; set YASE_SLOW_TESTS=1 for the full 10K run
+	// (CI does this in a dedicated job).
+	n := 2000
+	if os.Getenv("YASE_SLOW_TESTS") == "1" {
+		n = 10000
+	}
+
 	g, _ := makeTestGraph(t, n)
 	defer g.arena.Close()
 
@@ -211,7 +220,7 @@ func TestMultiLayerStructure(t *testing.T) {
 		t.Errorf("max level %d seems too high for %d nodes (expected ~%.1f)", g.MaxLevel(), n, expectedMaxLevel)
 	}
 
-	t.Logf("10K nodes: max level = %d (expected ~%.1f)", g.MaxLevel(), expectedMaxLevel)
+	t.Logf("%d nodes: max level = %d (expected ~%.1f)", n, g.MaxLevel(), expectedMaxLevel)
 }
 
 func TestBidirectionalEdges(t *testing.T) {

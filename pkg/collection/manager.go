@@ -164,13 +164,25 @@ func (m *Manager) Create(ctx context.Context, tenantID, id, name string, cfg Col
 	return c, nil
 }
 
-// Get returns collection metadata.
-func (m *Manager) Get(ctx context.Context, id string) (*Collection, error) {
+// accessible reports whether callerTenant may act on c.
+//
+// An empty callerTenant means the caller is unscoped — auth disabled, or a
+// token carrying no tenant — and retains full access, which is what
+// single-tenant deployments rely on.
+func accessible(callerTenant string, c *Collection) bool {
+	return callerTenant == "" || c.TenantID == callerTenant
+}
+
+// Get returns collection metadata for a collection the caller's tenant owns.
+//
+// Callers outside the owning tenant get ErrNotFound rather than a permission
+// error, so the response does not confirm that the collection exists.
+func (m *Manager) Get(ctx context.Context, callerTenant, id string) (*Collection, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
 	c, ok := m.cols[id]
-	if !ok {
+	if !ok || !accessible(callerTenant, c) {
 		return nil, fmt.Errorf("%w: %q", ErrNotFound, id)
 	}
 	cp := *c
@@ -195,12 +207,12 @@ func (m *Manager) List(ctx context.Context, tenantID string) ([]*Collection, err
 }
 
 // Update modifies a collection's mutable fields (name, description, config).
-func (m *Manager) Update(ctx context.Context, id, name, description string) (*Collection, error) {
+func (m *Manager) Update(ctx context.Context, callerTenant, id, name, description string) (*Collection, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	c, ok := m.cols[id]
-	if !ok {
+	if !ok || !accessible(callerTenant, c) {
 		return nil, fmt.Errorf("%w: %q", ErrNotFound, id)
 	}
 
@@ -220,7 +232,7 @@ func (m *Manager) Update(ctx context.Context, id, name, description string) (*Co
 
 // Delete tears down a collection: closes the engine, removes data, and deletes
 // metadata. The _default collection cannot be deleted.
-func (m *Manager) Delete(ctx context.Context, id string) error {
+func (m *Manager) Delete(ctx context.Context, callerTenant, id string) error {
 	if id == DefaultCollectionID {
 		return fmt.Errorf("%w: %q", ErrDefaultDelete, DefaultCollectionID)
 	}
@@ -229,7 +241,7 @@ func (m *Manager) Delete(ctx context.Context, id string) error {
 	defer m.mu.Unlock()
 
 	c, ok := m.cols[id]
-	if !ok {
+	if !ok || !accessible(callerTenant, c) {
 		return fmt.Errorf("%w: %q", ErrNotFound, id)
 	}
 
@@ -293,13 +305,48 @@ func (m *Manager) AllEngines() map[string]*index.HybridEngine {
 	return result
 }
 
+// EnginesForTenant returns the engines the caller's tenant may search.
+//
+// With ids empty it returns every collection the tenant owns; otherwise it
+// returns the named ones it owns, silently dropping the rest — naming another
+// tenant's collection must not confirm that it exists.
+//
+// An empty callerTenant is unscoped and reaches everything, matching Get and
+// List.
+func (m *Manager) EnginesForTenant(callerTenant string, ids []string) map[string]*index.HybridEngine {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	result := make(map[string]*index.HybridEngine)
+
+	if len(ids) == 0 {
+		for id, eng := range m.engines {
+			if c, ok := m.cols[id]; ok && accessible(callerTenant, c) {
+				result[id] = eng
+			}
+		}
+		return result
+	}
+
+	for _, id := range ids {
+		c, ok := m.cols[id]
+		if !ok || !accessible(callerTenant, c) {
+			continue
+		}
+		if eng, ok := m.engines[id]; ok {
+			result[id] = eng
+		}
+	}
+	return result
+}
+
 // BindConnector associates a connector job ID with a collection.
-func (m *Manager) BindConnector(ctx context.Context, collectionID, connectorJobID string) error {
+func (m *Manager) BindConnector(ctx context.Context, callerTenant, collectionID, connectorJobID string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	c, ok := m.cols[collectionID]
-	if !ok {
+	if !ok || !accessible(callerTenant, c) {
 		return fmt.Errorf("%w: %q", ErrNotFound, collectionID)
 	}
 
@@ -314,12 +361,12 @@ func (m *Manager) BindConnector(ctx context.Context, collectionID, connectorJobI
 }
 
 // UnbindConnector removes a connector job association from a collection.
-func (m *Manager) UnbindConnector(ctx context.Context, collectionID, connectorJobID string) error {
+func (m *Manager) UnbindConnector(ctx context.Context, callerTenant, collectionID, connectorJobID string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	c, ok := m.cols[collectionID]
-	if !ok {
+	if !ok || !accessible(callerTenant, c) {
 		return fmt.Errorf("%w: %q", ErrNotFound, collectionID)
 	}
 

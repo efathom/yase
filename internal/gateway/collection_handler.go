@@ -6,12 +6,14 @@ import (
 	"log/slog"
 	"net/http"
 
+	"github.com/efathom/yase/pkg/auth"
 	"github.com/efathom/yase/pkg/collection"
 )
 
 // CollectionHandler serves the /v1/collections CRUD endpoints.
 type CollectionHandler struct {
-	Manager *collection.Manager
+	Manager     *collection.Manager
+	authEnabled bool
 }
 
 // NewCollectionHandler creates a collection CRUD handler.
@@ -19,16 +21,44 @@ func NewCollectionHandler(mgr *collection.Manager) *CollectionHandler {
 	return &CollectionHandler{Manager: mgr}
 }
 
+// SetAuthEnabled turns on per-route scope enforcement. When false the routes
+// are served without scope checks, matching a deployment with auth disabled.
+func (ch *CollectionHandler) SetAuthEnabled(enabled bool) *CollectionHandler {
+	ch.authEnabled = enabled
+	return ch
+}
+
+// requireScope wraps a handler in a scope check when auth is enabled.
+func (ch *CollectionHandler) requireScope(scope string, next http.HandlerFunc) http.Handler {
+	if !ch.authEnabled {
+		return next
+	}
+	return auth.RequireScope(scope)(next)
+}
+
+// callerTenant returns the authenticated tenant for this request. It is the
+// only source of tenant identity — request bodies and query parameters are
+// never trusted for it.
+func callerTenant(r *http.Request) string {
+	if ac := auth.FromContext(r.Context()); ac != nil {
+		return ac.TenantID
+	}
+	return ""
+}
+
 // RegisterRoutes mounts collection CRUD endpoints on the given mux.
+//
+// Reads require the "search" scope; anything that creates, mutates, or
+// destroys a collection requires "admin".
 func (ch *CollectionHandler) RegisterRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("POST /v1/collections", ch.handleCreate)
-	mux.HandleFunc("GET /v1/collections", ch.handleList)
-	mux.HandleFunc("GET /v1/collections/{id}", ch.handleGet)
-	mux.HandleFunc("PUT /v1/collections/{id}", ch.handleUpdate)
-	mux.HandleFunc("DELETE /v1/collections/{id}", ch.handleDelete)
-	mux.HandleFunc("POST /v1/collections/{id}/connectors", ch.handleBindConnector)
-	mux.HandleFunc("DELETE /v1/collections/{id}/connectors/{connectorId}", ch.handleUnbindConnector)
-	mux.HandleFunc("GET /v1/collections/{id}/stats", ch.handleStats)
+	mux.Handle("POST /v1/collections", ch.requireScope("admin", ch.handleCreate))
+	mux.Handle("GET /v1/collections", ch.requireScope("search", ch.handleList))
+	mux.Handle("GET /v1/collections/{id}", ch.requireScope("search", ch.handleGet))
+	mux.Handle("PUT /v1/collections/{id}", ch.requireScope("admin", ch.handleUpdate))
+	mux.Handle("DELETE /v1/collections/{id}", ch.requireScope("admin", ch.handleDelete))
+	mux.Handle("POST /v1/collections/{id}/connectors", ch.requireScope("admin", ch.handleBindConnector))
+	mux.Handle("DELETE /v1/collections/{id}/connectors/{connectorId}", ch.requireScope("admin", ch.handleUnbindConnector))
+	mux.Handle("GET /v1/collections/{id}/stats", ch.requireScope("search", ch.handleStats))
 }
 
 // --- Request/Response types ---
@@ -93,7 +123,7 @@ func (ch *CollectionHandler) handleCreate(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	c, err := ch.Manager.Create(r.Context(), req.TenantID, req.ID, req.Name, req.Config)
+	c, err := ch.Manager.Create(r.Context(), callerTenant(r), req.ID, req.Name, req.Config)
 	if err != nil {
 		ch.writeError(w, err)
 		return
@@ -103,7 +133,7 @@ func (ch *CollectionHandler) handleCreate(w http.ResponseWriter, r *http.Request
 
 func (ch *CollectionHandler) handleGet(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	c, err := ch.Manager.Get(r.Context(), id)
+	c, err := ch.Manager.Get(r.Context(), callerTenant(r), id)
 	if err != nil {
 		ch.writeError(w, err)
 		return
@@ -112,8 +142,9 @@ func (ch *CollectionHandler) handleGet(w http.ResponseWriter, r *http.Request) {
 }
 
 func (ch *CollectionHandler) handleList(w http.ResponseWriter, r *http.Request) {
-	tenantID := r.URL.Query().Get("tenant_id")
-	cols, err := ch.Manager.List(r.Context(), tenantID)
+	// Scoped to the authenticated tenant — a tenant_id query parameter must
+	// not be able to widen or redirect the listing.
+	cols, err := ch.Manager.List(r.Context(), callerTenant(r))
 	if err != nil {
 		ch.writeError(w, err)
 		return
@@ -129,7 +160,7 @@ func (ch *CollectionHandler) handleUpdate(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	c, err := ch.Manager.Update(r.Context(), id, req.Name, req.Description)
+	c, err := ch.Manager.Update(r.Context(), callerTenant(r), id, req.Name, req.Description)
 	if err != nil {
 		ch.writeError(w, err)
 		return
@@ -139,7 +170,7 @@ func (ch *CollectionHandler) handleUpdate(w http.ResponseWriter, r *http.Request
 
 func (ch *CollectionHandler) handleDelete(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	if err := ch.Manager.Delete(r.Context(), id); err != nil {
+	if err := ch.Manager.Delete(r.Context(), callerTenant(r), id); err != nil {
 		ch.writeError(w, err)
 		return
 	}
@@ -158,7 +189,7 @@ func (ch *CollectionHandler) handleBindConnector(w http.ResponseWriter, r *http.
 		return
 	}
 
-	if err := ch.Manager.BindConnector(r.Context(), colID, req.ConnectorJobID); err != nil {
+	if err := ch.Manager.BindConnector(r.Context(), callerTenant(r), colID, req.ConnectorJobID); err != nil {
 		ch.writeError(w, err)
 		return
 	}
@@ -169,7 +200,7 @@ func (ch *CollectionHandler) handleUnbindConnector(w http.ResponseWriter, r *htt
 	colID := r.PathValue("id")
 	connID := r.PathValue("connectorId")
 
-	if err := ch.Manager.UnbindConnector(r.Context(), colID, connID); err != nil {
+	if err := ch.Manager.UnbindConnector(r.Context(), callerTenant(r), colID, connID); err != nil {
 		ch.writeError(w, err)
 		return
 	}
@@ -178,7 +209,7 @@ func (ch *CollectionHandler) handleUnbindConnector(w http.ResponseWriter, r *htt
 
 func (ch *CollectionHandler) handleStats(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	c, err := ch.Manager.Get(r.Context(), id)
+	c, err := ch.Manager.Get(r.Context(), callerTenant(r), id)
 	if err != nil {
 		ch.writeError(w, err)
 		return

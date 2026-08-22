@@ -5,6 +5,7 @@ package indexsvc
 import (
 	"context"
 
+	"github.com/efathom/yase/pkg/auth"
 	"github.com/efathom/yase/pkg/index"
 	ingestionv1 "github.com/efathom/yase/proto/v1"
 )
@@ -20,13 +21,15 @@ func NewServer(engine *index.HybridEngine) *Server {
 	return &Server{engine: engine}
 }
 
-// Ingest adds a document to the hybrid index.
+// Ingest adds a document to the hybrid index, tagging it with the
+// authenticated tenant so later searches can be scoped to it.
 func (s *Server) Ingest(ctx context.Context, req *ingestionv1.IngestRequest) (*ingestionv1.IngestResponse, error) {
 	doc := index.Document{
-		ID:       req.DocId,
-		Text:     req.Text,
-		Vector:   req.Vector,
-		Metadata: req.Metadata,
+		ID:     req.DocId,
+		Text:   req.Text,
+		Vector: req.Vector,
+		// Overwrites any caller-supplied "_tenant" with the authenticated one.
+		Metadata: auth.InjectTenantMetadata(auth.FromContext(ctx), req.Metadata),
 	}
 	if err := s.engine.Ingest(ctx, doc); err != nil {
 		return &ingestionv1.IngestResponse{Ok: false}, err
@@ -41,7 +44,9 @@ func (s *Server) Search(ctx context.Context, req *ingestionv1.SearchRequest) (*i
 		topK = 10
 	}
 
-	scored, err := s.engine.HybridSearch(ctx, req.Query, req.QueryVector, req.Filters, topK)
+	filters := auth.InjectTenantFilter(auth.FromContext(ctx), req.Filters)
+
+	scored, err := s.engine.HybridSearch(ctx, req.Query, req.QueryVector, filters, topK)
 	if err != nil {
 		return nil, err
 	}

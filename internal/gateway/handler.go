@@ -149,9 +149,11 @@ func clientIP(r *http.Request) string {
 }
 
 // DeleteSearcher extends Searcher with document deletion capability.
+// Both methods take metadata filters so tenant scoping is part of the
+// signature rather than something a handler can forget to apply.
 type DeleteSearcher interface {
 	Searcher
-	Delete(ctx context.Context, docIDs []uint32) (int, error)
+	Delete(ctx context.Context, docIDs []uint32, filters map[string]string) (int, error)
 	DeleteByFilter(ctx context.Context, filters map[string]string) (int, error)
 }
 
@@ -319,7 +321,7 @@ func (h *Handler) handleCollectionSearch(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	results, err := h.CollectionSearcher.SearchSingle(r.Context(), colID, req.Query, queryVec, filters, req.TopK)
+	results, err := h.CollectionSearcher.SearchSingle(r.Context(), callerTenant(r), colID, req.Query, queryVec, filters, req.TopK)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, SearchResponse{Status: "error: search failed"})
 		return
@@ -362,7 +364,7 @@ func (h *Handler) handleCrossCollectionSearch(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	results, err := h.CollectionSearcher.Search(r.Context(), req.Collections, req.Query, queryVec, filters, req.TopK)
+	results, err := h.CollectionSearcher.Search(r.Context(), callerTenant(r), req.Collections, req.Query, queryVec, filters, req.TopK)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, SearchResponse{Status: "error: search failed"})
 		return
@@ -471,8 +473,8 @@ func (s *LocalSearcher) GetDocumentsByIDs(ctx context.Context, ids []uint32) (ma
 	return s.Engine.BlugeStore.GetDocumentsByIDs(ctx, ids)
 }
 
-func (s *LocalSearcher) Delete(ctx context.Context, docIDs []uint32) (int, error) {
-	return s.Engine.Delete(ctx, docIDs)
+func (s *LocalSearcher) Delete(ctx context.Context, docIDs []uint32, filters map[string]string) (int, error) {
+	return s.Engine.Delete(ctx, docIDs, filters)
 }
 
 func (s *LocalSearcher) DeleteByFilter(ctx context.Context, filters map[string]string) (int, error) {
