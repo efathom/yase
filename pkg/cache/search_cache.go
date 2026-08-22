@@ -128,7 +128,7 @@ func (c *SearchCache) cacheKey(query string, filters map[string]string, topK int
 	// key's serialization and read back another entry's results.
 	h := sha256.New()
 	writePart := func(s string) {
-		fmt.Fprintf(h, "%d:%s", len(s), s)
+		_, _ = fmt.Fprintf(h, "%d:%s", len(s), s)
 	}
 
 	writePart(c.collectionID)

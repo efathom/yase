@@ -264,7 +264,7 @@ func (w *WorkerNode) pollForURLs(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			return
-case <-ticker.C:
+		case <-ticker.C:
 			assignURL := fmt.Sprintf("%s/assign?worker_id=%s", w.MasterURL, w.ID)
 			req, err := http.NewRequestWithContext(ctx, "GET", assignURL, nil)
 			if err != nil {
