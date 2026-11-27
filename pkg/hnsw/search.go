@@ -40,7 +40,8 @@ func (h *maxHeap) Pop() any {
 // It performs a greedy best-first search at a single layer, returning up to ef
 // nearest candidates. distFunc computes the distance from the query to a node ID.
 func SearchLayer(entryPointID uint32, ef int, layer int, getEdges func(id uint32, layer int) []uint32, distFunc func(id uint32) float32) []Candidate {
-	visited := make(map[uint32]struct{}, ef*2)
+	visited := getVisited()
+	defer putVisited(visited)
 
 	epDist := distFunc(entryPointID)
 	visited[entryPointID] = struct{}{}

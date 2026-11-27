@@ -16,8 +16,10 @@ type ScoredResult struct {
 //
 //	FusedScore(d) = 1/(k + BM25_rank) + 1/(k + Semantic_rank)
 //
-// k=60 is the standard hyperparameter that prevents low-rank documents from
-// dominating. RRF is scale-independent — it merges by rank order, not raw scores.
+// Only documents that actually matched the text query (BM25Score > 0) get a
+// lexical rank; the rest receive no lexical contribution rather than an
+// arbitrary rank among ties. k=60 is the standard hyperparameter. RRF is
+// scale-independent — it merges by rank order, not raw scores.
 func ReciprocalRankFusion(candidates []ScoredResult, topK int) []ScoredResult {
 	if len(candidates) == 0 {
 		return nil
@@ -25,33 +27,38 @@ func ReciprocalRankFusion(candidates []ScoredResult, topK int) []ScoredResult {
 
 	const kRRF = 60.0
 
-	// 1. Rank by BM25 score descending → assign lexical ranks (1-indexed)
+	// 1. Lexical ranks for documents that matched the text query.
 	sort.SliceStable(candidates, func(i, j int) bool {
 		return candidates[i].BM25Score > candidates[j].BM25Score
 	})
 	bm25Ranks := make(map[uint32]int, len(candidates))
 	for i, c := range candidates {
+		if c.BM25Score <= 0 {
+			break
+		}
 		bm25Ranks[c.ID] = i + 1
 	}
 
-	// 2. Rank by semantic score descending → assign semantic ranks (1-indexed)
+	// 2. Semantic ranks.
 	sort.SliceStable(candidates, func(i, j int) bool {
 		return candidates[i].SemanticScore > candidates[j].SemanticScore
 	})
 
-	// 3. Compute fused score per candidate
+	// 3. Fused score.
 	for i, c := range candidates {
-		semanticRank := i + 1
-		lexicalRank := bm25Ranks[c.ID]
-		candidates[i].FusedScore = 1.0/(kRRF+float64(lexicalRank)) + 1.0/(kRRF+float64(semanticRank))
+		score := 1.0 / (kRRF + float64(i+1))
+		if r, ok := bm25Ranks[c.ID]; ok {
+			score += 1.0 / (kRRF + float64(r))
+		}
+		candidates[i].FusedScore = score
 	}
 
-	// 4. Sort by fused score descending
+	// 4. Sort by fused score descending.
 	sort.SliceStable(candidates, func(i, j int) bool {
 		return candidates[i].FusedScore > candidates[j].FusedScore
 	})
 
-	if len(candidates) > topK {
+	if topK > 0 && len(candidates) > topK {
 		return candidates[:topK]
 	}
 	return candidates

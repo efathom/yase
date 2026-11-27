@@ -2,134 +2,164 @@ package index
 
 import (
 	"fmt"
+	"os"
 	"sort"
 
 	"github.com/efathom/yase/pkg/hnsw"
 	"github.com/efathom/yase/pkg/memory"
 )
 
-// Compact reclaims arena space and rebuilds the HNSW graph + inverted files
-// from the live (non-deleted) documents. Deleted documents are not in
-// VectorOffsets, so they are naturally dropped. The Bluge index is unchanged
-// (it already excludes deleted documents).
-//
-// Currently supported only for in-memory (OffHeapArena) engines. The caller
-// must not hold any engine locks; Compact acquires lifecycleMu exclusively.
-func (he *HybridEngine) Compact() error {
-	he.lifecycleMu.Lock()
-	defer he.lifecycleMu.Unlock()
+// compactMinDeadBytes is the smallest amount of garbage worth compacting.
+const compactMinDeadBytes = 16 << 20
 
+// MaybeCompact compacts the engine when dead vector bytes exceed ratio of the
+// arena watermark (and at least compactMinDeadBytes). It reports whether a
+// compaction ran.
+func (he *HybridEngine) MaybeCompact(ratio float64) (bool, error) {
+	dead := he.deadBytes.Load()
+	used := he.ArenaUsedBytes()
+	if dead < compactMinDeadBytes || used == 0 || float64(dead) < ratio*float64(used) {
+		return false, nil
+	}
+	return true, he.Compact()
+}
+
+// Compact reclaims arena space held by deleted or replaced vectors and
+// rebuilds the HNSW graph and inverted files from the live documents, using
+// the engine's configured HNSW parameters.
+//
+// Writes are blocked for the duration; searches keep running against the old
+// structures until the new ones are swapped in. Persistent engines build a new
+// generation on disk and switch CURRENT to it only once it is complete, so a
+// crash mid-compaction leaves the previous generation intact.
+func (he *HybridEngine) Compact() error {
+	he.writeMu.Lock()
+	defer he.writeMu.Unlock()
+	if err := he.acquire(); err != nil {
+		return err
+	}
+
+	newArena, newGraph, newIF, newLeaf, newOffsets, newGen, err := he.rebuild()
+	he.release()
+	if err != nil {
+		return err
+	}
+
+	// Swap under the exclusive lifecycle lock (waits for in-flight searches).
+	he.lifecycleMu.Lock()
 	if he.closed.Load() {
+		he.lifecycleMu.Unlock()
+		newArena.Close()
 		return ErrEngineClosed
 	}
-
 	oldArena := he.Arena
-	if _, ok := oldArena.(*memory.OffHeapArena); !ok {
-		return fmt.Errorf("compaction is only supported for in-memory (OffHeapArena) engines")
+	oldGen := 0
+	if he.store != nil {
+		oldGen = he.store.gen
 	}
+	he.Arena = newArena
+	he.Graph = newGraph
+	he.ifMu.Lock()
+	he.invertedFiles, he.leafCentroid, he.offsets = newIF, newLeaf, newOffsets
+	he.ifMu.Unlock()
+	he.deadBytes.Store(0)
+	he.gen.Add(1)
 
-	// Collect live vectors, copying out of the old arena before it is released.
+	var persistErr error
+	if he.store != nil {
+		he.store.gen = newGen
+		if persistErr = he.checkpointLocked(newGen); persistErr == nil {
+			persistErr = he.store.writeCurrent(newGen)
+		}
+	}
+	he.lifecycleMu.Unlock()
+
+	oldArena.Close()
+	if he.store != nil && persistErr == nil {
+		_ = os.RemoveAll(he.store.genDir(oldGen))
+	}
+	if persistErr != nil {
+		return fmt.Errorf("persist compacted generation: %w", persistErr)
+	}
+	return nil
+}
+
+func (he *HybridEngine) rebuild() (memory.Arena, *hnsw.Graph, map[uint32][]uint32, map[uint32]uint32, map[uint32]uint64, int, error) {
 	type liveDoc struct {
 		id  uint32
 		vec []float32
 	}
-	var live []liveDoc
-	he.VectorOffsets.Range(func(k, v any) bool {
-		id := k.(uint32)
-		off := v.(uint64)
-		raw := oldArena.GetFloat32(off, he.VecDim)
+	he.ifMu.RLock()
+	live := make([]liveDoc, 0, len(he.offsets))
+	for id, off := range he.offsets {
 		cp := make([]float32, he.VecDim)
-		copy(cp, raw)
+		copy(cp, he.Arena.GetFloat32(off, he.VecDim))
 		live = append(live, liveDoc{id: id, vec: cp})
-		return true
-	})
-
-	if len(live) == 0 {
-		return nil
 	}
-
-	// Deterministic order so compaction is reproducible.
+	he.ifMu.RUnlock()
 	sort.Slice(live, func(i, j int) bool { return live[i].id < live[j].id })
 
-	// Determine centroid set: every CentroidRate-th doc, and always the first
-	// doc so at least one centroid exists (mirrors the Ingest routing rule).
-	isCentroid := make(map[uint32]bool, len(live)/max(he.CentroidRate, 1)+1)
-	haveCentroid := false
-	for i, d := range live {
-		if d.id%uint32(he.CentroidRate) == 0 || i == 0 {
-			isCentroid[d.id] = true
-			haveCentroid = true
+	var (
+		arena  memory.Arena
+		newGen int
+		err    error
+	)
+	if he.store != nil {
+		newGen = he.store.gen + 1
+		if err = os.MkdirAll(he.store.genDir(newGen), 0o755); err != nil {
+			return nil, nil, nil, nil, nil, 0, err
 		}
+		arena, err = memory.NewFileArena(he.store.arenaPath(newGen), he.arenaCap)
+	} else {
+		arena, err = memory.NewOffHeapArena(he.arenaCap)
 	}
-	if !haveCentroid {
-		isCentroid[live[0].id] = true
-	}
-
-	// New arena sized to the live set with headroom.
-	liveBytes := uint64(len(live) * he.VecDim * 4)
-	newSize := liveBytes * 2
-	if newSize < 1<<20 {
-		newSize = 1 << 20
-	}
-	newArena, err := memory.NewOffHeapArena(newSize)
 	if err != nil {
-		return fmt.Errorf("new arena: %w", err)
+		return nil, nil, nil, nil, nil, 0, fmt.Errorf("new arena: %w", err)
+	}
+	fail := func(e error) (memory.Arena, *hnsw.Graph, map[uint32][]uint32, map[uint32]uint32, map[uint32]uint64, int, error) {
+		arena.Close()
+		if he.store != nil {
+			_ = os.RemoveAll(he.store.genDir(newGen))
+		}
+		return nil, nil, nil, nil, nil, 0, e
 	}
 
-	graph := hnsw.NewGraph(newArena, hnsw.DefaultConfig(he.VecDim))
-	newOffsets := make(map[uint32]uint64)
-	newIF := make(map[uint32][]uint32)
+	cfg := engineGraphConfig(he.Graph.Config())
+	graph := hnsw.NewGraph(arena, cfg)
+	offsets := make(map[uint32]uint64, len(live))
+	inv := make(map[uint32][]uint32)
+	leafOf := make(map[uint32]uint32)
+	rate := uint32(he.CentroidRate)
 
-	// Pass 1: insert centroids.
-	for _, d := range live {
-		if !isCentroid[d.id] {
+	// Pass 1: centroids (every rate-th ID, plus the first doc so one exists).
+	for i, d := range live {
+		if d.id%rate != 0 && i != 0 {
 			continue
 		}
-		off, err := newArena.AllocFloat32(d.vec)
+		off, err := arena.AllocFloat32(d.vec)
 		if err != nil {
-			newArena.Close()
-			return fmt.Errorf("alloc centroid %d: %w", d.id, err)
+			return fail(fmt.Errorf("alloc centroid %d: %w", d.id, err))
 		}
 		if err := graph.InsertAt(d.id, d.vec, off); err != nil {
-			newArena.Close()
-			return fmt.Errorf("insert centroid %d: %w", d.id, err)
+			return fail(fmt.Errorf("insert centroid %d: %w", d.id, err))
 		}
-		newOffsets[d.id] = off
+		offsets[d.id] = off
 	}
-
 	// Pass 2: leaves routed to their nearest centroid.
-	for _, d := range live {
-		if isCentroid[d.id] {
+	for i, d := range live {
+		if d.id%rate == 0 || i == 0 {
 			continue
 		}
-		off, err := newArena.AllocFloat32(d.vec)
+		off, err := arena.AllocFloat32(d.vec)
 		if err != nil {
-			newArena.Close()
-			return fmt.Errorf("alloc leaf %d: %w", d.id, err)
+			return fail(fmt.Errorf("alloc leaf %d: %w", d.id, err))
 		}
-		newOffsets[d.id] = off
-		if graph.Len() > 0 {
-			if res := graph.Search(d.vec, 1, 10); len(res) > 0 {
-				centroidID := res[0].ID
-				newIF[centroidID] = append(newIF[centroidID], d.id)
-			}
+		offsets[d.id] = off
+		if res := graph.Search(d.vec, 1, 10); len(res) > 0 {
+			c := res[0].ID
+			inv[c] = append(inv[c], d.id)
+			leafOf[d.id] = c
 		}
 	}
-
-	// Swap in the new structures (safe: exclusive lifecycle lock held).
-	he.Arena = newArena
-	he.Graph = graph
-	he.invertedFiles = newIF
-
-	// Rebuild the offset map in place (sync.Map cannot be copied).
-	he.VectorOffsets.Range(func(k, _ any) bool {
-		he.VectorOffsets.Delete(k)
-		return true
-	})
-	for id, off := range newOffsets {
-		he.VectorOffsets.Store(id, off)
-	}
-
-	oldArena.Close()
-	return nil
+	return arena, graph, inv, leafOf, offsets, newGen, nil
 }

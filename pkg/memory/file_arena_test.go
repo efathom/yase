@@ -1,6 +1,7 @@
 package memory
 
 import (
+	"os"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -161,14 +162,16 @@ func TestFileArenaInvalidMagic(t *testing.T) {
 	arena, _ := NewFileArena(path, 256)
 	arena.Close()
 
-	// Corrupt the magic bytes by reopening and writing garbage
-	arena2, _ := OpenFileArena(path)
-	arena2.data[0] = 0xFF
-	arena2.data[1] = 0xFF
-	arena2.Close()
+	// Corrupt the magic bytes on disk
+	f, err := os.OpenFile(path, os.O_RDWR, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = f.WriteAt([]byte{0xFF, 0xFF}, 0)
+	f.Close()
 
 	// Should fail to open
-	_, err := OpenFileArena(path)
+	_, err = OpenFileArena(path)
 	if err == nil {
 		t.Error("expected error for corrupted magic")
 	}

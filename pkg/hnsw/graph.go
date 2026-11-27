@@ -47,8 +47,8 @@ func DefaultConfig(vecDim int) Config {
 // Graph is the main HNSW index structure. The nodes map is protected by a
 // RWMutex, but individual edge lists use lock-free CAS for concurrent updates.
 type Graph struct {
-	mu         sync.RWMutex
-	nodes      map[uint32]*Node
+	mu         sync.RWMutex // guards maxLevel and entry-point promotion
+	nodes      *nodeMap
 	entryPoint atomic.Pointer[Node]
 	maxLevel   int
 	arena      memory.Arena
@@ -64,7 +64,7 @@ func NewGraph(arena memory.Arena, cfg Config) *Graph {
 		cfg.DistFunc = vector.DistCosine
 	}
 	return &Graph{
-		nodes: make(map[uint32]*Node),
+		nodes: newNodeMap(),
 		arena: arena,
 		cfg:   cfg,
 		ml:    1.0 / math.Log(float64(cfg.M)),
@@ -86,10 +86,7 @@ func (g *Graph) randomLevel() int {
 
 // getNode safely retrieves a node by ID.
 func (g *Graph) getNode(id uint32) *Node {
-	g.mu.RLock()
-	n := g.nodes[id]
-	g.mu.RUnlock()
-	return n
+	return g.nodes.get(id)
 }
 
 // distBetween computes distance between two nodes using arena vectors.
@@ -128,9 +125,12 @@ func (g *Graph) getEdges(id uint32, layer int) []uint32 {
 
 // Len returns the number of nodes in the graph.
 func (g *Graph) Len() int {
-	g.mu.RLock()
-	defer g.mu.RUnlock()
-	return len(g.nodes)
+	return g.nodes.len()
+}
+
+// Config returns the graph's hyperparameters.
+func (g *Graph) Config() Config {
+	return g.cfg
 }
 
 // EfSearch returns the configured search width (ef) for queries.
@@ -190,7 +190,7 @@ func (g *Graph) insertAt(id uint32, vec []float32, offset uint64) error {
 
 	// Add to nodes map
 	g.mu.Lock()
-	g.nodes[id] = node
+	g.nodes.set(id, node)
 	ep := g.entryPoint.Load()
 
 	// First node: set as entry point and return

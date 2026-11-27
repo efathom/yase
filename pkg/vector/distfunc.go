@@ -13,3 +13,8 @@ var (
 	DistCosineSP       DistFunc = func(a, b []float32) float32 { return 1 - CosineSimilaritySinglePass(a, b) }
 	DistL2Squared      DistFunc = L2SquaredUnrolled
 )
+
+// DistNormalizedDot is cosine distance for vectors that are already
+// L2-normalized: 1 - dot(a, b). It skips the two norm computations that
+// CosineDistance performs on every call.
+var DistNormalizedDot DistFunc = func(a, b []float32) float32 { return 1 - DotProductUnrolled(a, b) }

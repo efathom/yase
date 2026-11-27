@@ -11,6 +11,10 @@ import (
 // Warmup prefaults mmap pages into memory to avoid cold-start latency.
 // Touches every page in the arena to trigger page faults upfront.
 func (he *HybridEngine) Warmup() {
+	if he.acquire() != nil {
+		return
+	}
+	defer he.release()
 	start := time.Now()
 
 	switch a := he.Arena.(type) {
@@ -33,13 +37,20 @@ func warmupArena(a *memory.FileArena) {
 	if used == 0 {
 		return
 	}
-
-	pageSize := os.Getpagesize()
-	// Read one byte per page to trigger page fault
-	data := a.GetBytes(0, int(used))
+	pageSize := uint64(os.Getpagesize())
+	seg := a.SegmentSize()
 	var sink byte
-	for i := 0; i < len(data); i += pageSize {
-		sink ^= data[i]
+	// Touch one byte per page, one segment at a time (a view never spans
+	// two segments).
+	for off := uint64(0); off < used; off += seg {
+		n := seg
+		if used-off < n {
+			n = used - off
+		}
+		data := a.GetBytes(off, int(n))
+		for i := uint64(0); i < uint64(len(data)); i += pageSize {
+			sink ^= data[i]
+		}
 	}
 	_ = sink
 }
