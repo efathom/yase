@@ -13,6 +13,12 @@ service IndexService {
 
   // Stats returns index health information.
   rpc Stats(StatsRequest) returns (StatsResponse);
+
+  // GetDocuments returns stored content + metadata (RAG citations).
+  rpc GetDocuments(GetDocumentsRequest) returns (GetDocumentsResponse);
+
+  // DeleteDocuments removes documents by ID or by metadata filter.
+  rpc DeleteDocuments(DeleteDocumentsRequest) returns (DeleteDocumentsResponse);
 }
 
 message IngestRequest {
@@ -29,10 +35,19 @@ message IngestResponse {
 
 message SearchRequest {
   string query = 1;
+  // Query embedding. When empty, the index service embeds the query with each
+  // target collection's own embedder (required when collections differ).
   repeated float query_vector = 2;
   map<string, string> filters = 3;
   int32 top_k = 4;
   string collection_id = 5; // target collection (empty = _default)
+  // Cross-collection search: search these collections (or all the caller may
+  // access when cross_collection is set and the list is empty).
+  repeated string collection_ids = 6;
+  bool cross_collection = 7;
+  // Tenant the (unscoped, service-identity) caller acts for. Ignored when
+  // the authenticated caller is itself tenant-scoped.
+  string caller_tenant = 8;
 }
 
 message ScoredResult {
@@ -47,13 +62,44 @@ message SearchResponse {
   repeated ScoredResult results = 1;
 }
 
-message StatsRequest {}
+message StatsRequest {
+  string collection_id = 1; // empty = _default
+}
 
 message StatsResponse {
   int64 hnsw_nodes = 1;
   int64 arena_used_bytes = 2;
   int64 centroids = 3;
   int64 leaves = 4;
+  uint64 generation = 5; // changes on every write (cache invalidation)
+  int64 documents = 6;
+}
+
+message Document {
+  uint32 id = 1;
+  string content = 2;
+  map<string, string> metadata = 3;
+}
+
+message GetDocumentsRequest {
+  string collection_id = 1;
+  repeated uint32 ids = 2;
+  string caller_tenant = 3;
+}
+
+message GetDocumentsResponse {
+  repeated Document documents = 1;
+}
+
+message DeleteDocumentsRequest {
+  string collection_id = 1;
+  repeated uint32 ids = 2;            // delete by ID (constrained by filters)
+  map<string, string> filters = 3;    // delete by filter when ids is empty
+  string caller_tenant = 4;
+}
+
+message DeleteDocumentsResponse {
+  int64 deleted = 1;
 }
 
 // ShardSearchService is hosted by each cluster node. The distributed gateway

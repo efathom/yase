@@ -104,19 +104,19 @@ func (m *Manager) RestoreAll(ctx context.Context) error {
 // any character outside [a-zA-Z0-9._-].
 func ValidateCollectionID(id string) error {
 	if id == "" {
-		return fmt.Errorf("collection id must not be empty")
+		return fmt.Errorf("%w: collection id must not be empty", ErrInvalidConfig)
 	}
 	if id == "." || id == ".." || strings.ContainsAny(id, `/\`) {
-		return fmt.Errorf("invalid collection id %q", id)
+		return fmt.Errorf("%w: invalid collection id %q", ErrInvalidConfig, id)
 	}
 	if len(id) > 64 {
-		return fmt.Errorf("collection id too long (max 64): %q", id)
+		return fmt.Errorf("%w: collection id too long (max 64): %q", ErrInvalidConfig, id)
 	}
 	for _, r := range id {
 		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '-' || r == '_' || r == '.' {
 			continue
 		}
-		return fmt.Errorf("invalid collection id %q: allowed characters are [a-zA-Z0-9._-]", id)
+		return fmt.Errorf("%w: invalid collection id %q: allowed characters are [a-zA-Z0-9._-]", ErrInvalidConfig, id)
 	}
 	return nil
 }

@@ -11,17 +11,17 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/efathom/yase/internal/broker"
+	"github.com/efathom/yase/internal/app"
 	"github.com/efathom/yase/internal/glue"
 	"github.com/efathom/yase/internal/indexsvc"
 	"github.com/efathom/yase/internal/shard"
 	"github.com/efathom/yase/pkg/auth"
+	"github.com/efathom/yase/pkg/collection"
 	"github.com/efathom/yase/pkg/config"
-	"github.com/efathom/yase/pkg/embedder"
-	"github.com/efathom/yase/pkg/index"
 	"github.com/efathom/yase/pkg/logging"
 	"github.com/efathom/yase/pkg/metrics"
 	"github.com/efathom/yase/pkg/pipeline"
+	"github.com/efathom/yase/pkg/reranker"
 	"github.com/efathom/yase/pkg/tracing"
 	ingestionv1 "github.com/efathom/yase/proto/v1"
 	"google.golang.org/grpc"
@@ -62,65 +62,67 @@ func main() {
 		}
 	}()
 
-	// Initialize embedder
-	emb, err := embedder.NewFromConfig(cfg.Embedder)
+	// Collections: each collection owns a durable HybridEngine. Restoring
+	// reconciles every engine with its text index (re-embedding anything not
+	// covered by the last checkpoint) before the service reports ready.
+	store, err := collection.NewFileStore(cfg.Collections.BasePath)
 	if err != nil {
-		slog.Error("failed to initialize embedder", "error", err)
+		slog.Error("Failed to create collection store", "error", err)
 		os.Exit(1)
 	}
+	mgr := collection.NewManager(store, cfg.Collections.BasePath, cfg, slog.Default())
+	if err := mgr.RestoreAll(ctx); err != nil {
+		slog.Error("Failed to restore collections", "error", err)
+		os.Exit(1)
+	}
+	defer mgr.Close()
 
-	// Initialize hybrid engine
-	engine, err := index.NewHybridEngineWithConfig(
-		cfg.Index.Path,
-		cfg.Index.ArenaSize,
-		index.HNswConfig(cfg.HNSW, cfg.Embedder.Dimension),
-		cfg.Index.CentroidRate,
-	)
-	if err != nil {
-		slog.Error("Failed to create hybrid engine", "error", err)
-		os.Exit(1)
+	if ranker := reranker.NewFromConfig(cfg.Reranker); ranker != nil {
+		mgr.SetReranker(ranker, cfg.Reranker.Candidates)
+		slog.Info("Reranker enabled", "provider", cfg.Reranker.Provider, "model", cfg.Reranker.Model)
 	}
-	defer engine.Close()
+	mgr.StartMaintenance(ctx, app.Maintenance(cfg.Index))
 
 	// Initialize WASM plugin engine
 	wasmEngine := pipeline.NewWasmEngine(ctx)
 	defer wasmEngine.Close(ctx)
 
-	// Build pipeline handler
-	pipelineHandler := glue.NewPipelineHandler(emb, engine, wasmEngine, 0.75)
-
-	// Start Kafka consumer with at-least-once semantics
-	daemon := glue.NewIndexingDaemon(
-		cfg.Kafka.Brokers,
-		cfg.Kafka.Topic,
-		cfg.Kafka.GroupID,
-		pipelineHandler.Handle,
-	)
-	if cfg.Kafka.DLQTopic != "" {
-		daemon.SetDLQ(broker.NewDLQWriter(cfg.Kafka.Brokers, cfg.Kafka.DLQTopic))
-	}
+	// Kafka consumer → collection-aware pipeline. Offsets are committed only
+	// after every engine has checkpointed, so a crash re-delivers instead of
+	// losing documents.
+	pipelineHandler := glue.NewCollectionPipelineHandler(mgr, wasmEngine, 0.75)
+	daemon := app.NewIndexingDaemon(cfg.Kafka, pipelineHandler.Handle, mgr.Checkpoint)
 
 	slog.Info("Indexer daemon starting, consuming from Kafka", "topic", cfg.Kafka.Topic)
-
+	daemonDone := make(chan struct{})
 	go func() {
+		defer close(daemonDone)
 		if err := daemon.Start(ctx); err != nil {
 			slog.Error("Indexing daemon error", "error", err)
 		}
 	}()
 
-	// Start gRPC IndexService so gateway can call Search remotely
-	idxServer := indexsvc.NewServer(engine)
+	// gRPC: IndexService (search, documents, delete), CollectionService (CRUD)
+	// and ShardSearchService (dist-gateway) over the same engines.
 	authOpts, err := auth.ServerAuthTLS(cfg.Auth, cfg.TLS)
 	if err != nil {
 		slog.Error("failed to configure auth/TLS", "error", err)
 		os.Exit(1)
 	}
+	if cfg.Server.MaxRecvMsgSize > 0 {
+		authOpts = append(authOpts, grpc.MaxRecvMsgSize(cfg.Server.MaxRecvMsgSize))
+	}
 	grpcServer := grpc.NewServer(authOpts...)
-	ingestionv1.RegisterIndexServiceServer(grpcServer, idxServer)
+	ingestionv1.RegisterIndexServiceServer(grpcServer, indexsvc.NewCollectionServer(mgr))
+	ingestionv1.RegisterCollectionServiceServer(grpcServer, indexsvc.NewCollectionService(mgr))
 
-	// Also register ShardSearchService so dist-gateway can query this node
+	defaultEngine, err := mgr.GetEngine(collection.DefaultCollectionID)
+	if err != nil {
+		slog.Error("default collection missing", "error", err)
+		os.Exit(1)
+	}
 	shardServer := shard.NewSearchServer()
-	shardServer.RegisterEngine(0, engine)
+	shardServer.RegisterEngine(0, defaultEngine)
 	ingestionv1.RegisterShardSearchServiceServer(grpcServer, shardServer)
 
 	grpcAddr := fmt.Sprintf(":%d", cfg.Index.GRPCPort)
@@ -137,19 +139,30 @@ func main() {
 		}
 	}()
 
+	emb, err := mgr.GetEmbedder(collection.DefaultCollectionID)
+	if err != nil {
+		slog.Error("default embedder missing", "error", err)
+		os.Exit(1)
+	}
+	health := app.ServeHealth(cfg.Server.HealthPort, func(ctx context.Context) error {
+		_, err := emb.Embed(ctx, "ping")
+		return err
+	})
+
 	// Graceful shutdown
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	sig := <-sigCh
+	slog.Info("Received signal, shutting down", "signal", sig)
 
-	select {
-	case sig := <-sigCh:
-		slog.Info("Received signal, shutting down", "signal", sig)
-		cancel()
-	case <-ctx.Done():
-	}
-
+	// Stop serving, drain the consumer (final checkpoint + commit), then the
+	// deferred mgr.Close writes final snapshots.
 	gracefulStop(grpcServer)
-	daemon.Close()
+	cancel()
+	<-daemonDone
+	if health != nil {
+		_ = health.Close()
+	}
 	slog.Info("Indexer shut down cleanly")
 }
 

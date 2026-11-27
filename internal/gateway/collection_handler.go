@@ -12,13 +12,14 @@ import (
 
 // CollectionHandler serves the /v1/collections CRUD endpoints.
 type CollectionHandler struct {
-	Manager     *collection.Manager
+	Manager     CollectionAPI
 	authEnabled bool
 }
 
-// NewCollectionHandler creates a collection CRUD handler.
-func NewCollectionHandler(mgr *collection.Manager) *CollectionHandler {
-	return &CollectionHandler{Manager: mgr}
+// NewCollectionHandler creates a collection CRUD handler over an in-process
+// manager or a remote CollectionService client.
+func NewCollectionHandler(api CollectionAPI) *CollectionHandler {
+	return &CollectionHandler{Manager: api}
 }
 
 // SetAuthEnabled turns on per-route scope enforcement. When false the routes
@@ -80,14 +81,6 @@ type bindConnectorRequest struct {
 	ConnectorJobID string `json:"connector_job_id"`
 }
 
-type collectionStatsResponse struct {
-	ID         string `json:"id"`
-	Name       string `json:"name"`
-	Status     string `json:"status"`
-	HNSWNodes  int    `json:"hnsw_nodes"`
-	Connectors int    `json:"connectors"`
-}
-
 // --- Handlers ---
 
 // writeError logs the full error server-side and returns a generic message
@@ -104,6 +97,9 @@ func (ch *CollectionHandler) writeError(w http.ResponseWriter, err error) {
 		code, msg = http.StatusNotFound, "collection not found"
 	case errors.Is(err, collection.ErrDefaultDelete):
 		code, msg = http.StatusForbidden, "cannot delete the default collection"
+	case errors.Is(err, collection.ErrInvalidConfig):
+		// Validation messages are safe to return and tell the caller what to fix.
+		code, msg = http.StatusBadRequest, err.Error()
 	}
 	writeJSON(w, code, map[string]string{"error": msg})
 }
@@ -128,7 +124,7 @@ func (ch *CollectionHandler) handleCreate(w http.ResponseWriter, r *http.Request
 		ch.writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, c)
+	writeJSON(w, http.StatusCreated, c.Redacted())
 }
 
 func (ch *CollectionHandler) handleGet(w http.ResponseWriter, r *http.Request) {
@@ -138,7 +134,7 @@ func (ch *CollectionHandler) handleGet(w http.ResponseWriter, r *http.Request) {
 		ch.writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, c)
+	writeJSON(w, http.StatusOK, c.Redacted())
 }
 
 func (ch *CollectionHandler) handleList(w http.ResponseWriter, r *http.Request) {
@@ -149,7 +145,11 @@ func (ch *CollectionHandler) handleList(w http.ResponseWriter, r *http.Request) 
 		ch.writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, cols)
+	redacted := make([]*collection.Collection, len(cols))
+	for i, c := range cols {
+		redacted[i] = c.Redacted()
+	}
+	writeJSON(w, http.StatusOK, redacted)
 }
 
 func (ch *CollectionHandler) handleUpdate(w http.ResponseWriter, r *http.Request) {
@@ -165,7 +165,7 @@ func (ch *CollectionHandler) handleUpdate(w http.ResponseWriter, r *http.Request
 		ch.writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, c)
+	writeJSON(w, http.StatusOK, c.Redacted())
 }
 
 func (ch *CollectionHandler) handleDelete(w http.ResponseWriter, r *http.Request) {
@@ -208,24 +208,10 @@ func (ch *CollectionHandler) handleUnbindConnector(w http.ResponseWriter, r *htt
 }
 
 func (ch *CollectionHandler) handleStats(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	c, err := ch.Manager.Get(r.Context(), callerTenant(r), id)
+	st, err := ch.Manager.Stats(r.Context(), callerTenant(r), r.PathValue("id"))
 	if err != nil {
 		ch.writeError(w, err)
 		return
 	}
-
-	eng, err := ch.Manager.GetEngine(id)
-	if err != nil {
-		ch.writeError(w, err)
-		return
-	}
-
-	writeJSON(w, http.StatusOK, collectionStatsResponse{
-		ID:         c.ID,
-		Name:       c.Name,
-		Status:     string(c.Status),
-		HNSWNodes:  eng.Graph.Len(),
-		Connectors: len(c.Connectors),
-	})
+	writeJSON(w, http.StatusOK, st)
 }

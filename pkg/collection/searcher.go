@@ -240,3 +240,27 @@ func crossCollectionRRF(results []SearchResult, topK int) []SearchResult {
 	}
 	return out
 }
+
+// NewQueryEmbedder returns a QueryEmbedder that embeds query once per
+// distinct embedder. If given is non-empty it is used for every collection
+// whose embedder produces vectors of that length.
+func NewQueryEmbedder(query string, given []float32) QueryEmbedder {
+	var mu sync.Mutex
+	cache := make(map[embedder.Embedder][]float32)
+	return func(ctx context.Context, _ string, emb embedder.Embedder) ([]float32, error) {
+		if len(given) > 0 && (emb.Dimension() == 0 || emb.Dimension() == len(given)) {
+			return given, nil
+		}
+		mu.Lock()
+		defer mu.Unlock()
+		if v, ok := cache[emb]; ok {
+			return v, nil
+		}
+		v, err := emb.Embed(ctx, query)
+		if err != nil {
+			return nil, err
+		}
+		cache[emb] = v
+		return v, nil
+	}
+}

@@ -59,6 +59,20 @@ func validateCrawlerMaster(c *Config, errs *[]error) {
 	}
 }
 
+// validateClusterAPI requires a join token whenever the cluster management
+// API (join/leave/shard assignment) listens beyond loopback.
+func validateClusterAPI(c *Config, errs *[]error) {
+	if c.Cluster.HTTPAddr == "" || isLoopbackListenAddr(c.Cluster.HTTPAddr) {
+		return
+	}
+	const minTokenLen = 16
+	if len(c.Cluster.JoinToken) < minTokenLen {
+		*errs = append(*errs, fmt.Errorf(
+			"cluster.join_token: at least %d characters required when cluster.http_addr (%q) is not loopback",
+			minTokenLen, c.Cluster.HTTPAddr))
+	}
+}
+
 // Validate checks the configuration for invalid or missing values.
 // Returns an error describing all validation failures.
 func (c *Config) Validate() error {
@@ -180,6 +194,18 @@ func (c *Config) Validate() error {
 
 	// Cluster
 	validatePort("cluster.shard_port", c.Cluster.ShardPort, &errs)
+	validateClusterAPI(c, &errs)
+
+	// Index maintenance
+	if c.Index.CompactDeadRatio < 0 || c.Index.CompactDeadRatio > 1 {
+		errs = append(errs, fmt.Errorf("index.compact_dead_ratio: must be within [0, 1], got %v", c.Index.CompactDeadRatio))
+	}
+	if c.Index.DefaultTTL < 0 {
+		errs = append(errs, fmt.Errorf("index.default_ttl: must be >= 0"))
+	}
+	if c.Kafka.Workers < 0 || c.Kafka.MaxAttempts < 0 {
+		errs = append(errs, fmt.Errorf("kafka.workers / kafka.max_attempts: must be >= 0"))
+	}
 
 	// Connectors
 	if c.Connectors.HTTPPort != 0 {

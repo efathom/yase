@@ -268,14 +268,17 @@ func TestCoordinatorFilterMerge(t *testing.T) {
 		Alias:   "tenant-a",
 		Query:   "test",
 		TopK:    10,
-		Filters: map[string]string{"env": "staging"}, // overrides alias "env"
+		Filters: map[string]string{"env": "staging", "tenant": "b", "lang": "go"}, // tries to override alias filters
 	})
 
 	if capturedFilters["tenant"] != "a" {
 		t.Errorf("alias filter 'tenant' should be 'a', got %q", capturedFilters["tenant"])
 	}
-	if capturedFilters["env"] != "staging" {
-		t.Errorf("user filter should override: got %q, want 'staging'", capturedFilters["env"])
+	if capturedFilters["tenant"] != "a" || capturedFilters["env"] != "prod" {
+		t.Errorf("alias filters must not be overridable by the query: got %v", capturedFilters)
+	}
+	if capturedFilters["lang"] != "go" {
+		t.Errorf("additional user filters still apply: got %q", capturedFilters["lang"])
 	}
 }
 

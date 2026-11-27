@@ -11,6 +11,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/efathom/yase/internal/app"
 	"github.com/efathom/yase/internal/gateway"
 	"github.com/efathom/yase/pkg/audit"
 	"github.com/efathom/yase/pkg/auth"
@@ -78,17 +79,31 @@ func main() {
 	}
 	defer cc.Close()
 
-	searcher := &gateway.RemoteSearcher{
-		Client: ingestionv1.NewIndexServiceClient(cc),
-	}
+	indexClient := ingestionv1.NewIndexServiceClient(cc)
+	searcher := &gateway.RemoteSearcher{Client: indexClient}
 
 	slog.Info("Gateway connected to IndexService", "addr", indexAddr)
 
-	// Wire up gateway handler
+	watchCtx, stopWatch := context.WithCancel(context.Background())
+	defer stopWatch()
+
+	// Wire up gateway handler. Collections, RAG text and deletes are served by
+	// the indexer over gRPC.
 	handler := gateway.NewHandler(searcher, emb)
-	if cfg.Cache.Enabled {
-		handler.SetCache(cache.NewSearchCache(collection.DefaultCollectionID, cfg.Cache.MaxSize, cfg.Cache.TTL))
+	handler.WithCollectionBackend(&gateway.RemoteCollectionSearch{Client: indexClient})
+	if err := handler.SetTrustedProxies(cfg.Server.TrustedProxies); err != nil {
+		slog.Error("invalid server.trusted_proxies", "error", err)
+		os.Exit(1)
 	}
+	if cfg.Cache.Enabled {
+		// Entries expire as soon as the indexer's generation moves.
+		go searcher.WatchGeneration(watchCtx, time.Second)
+		handler.SetCache(cache.NewSearchCache(collection.DefaultCollectionID, cfg.Cache.MaxSize, cfg.Cache.TTL).
+			SetGeneration(searcher.Generation))
+	}
+	collectionHandler := gateway.NewCollectionHandler(&gateway.RemoteCollections{
+		Client: ingestionv1.NewCollectionServiceClient(cc),
+	})
 	if cfg.Audit.Enabled {
 		auditLog := audit.NewLogger(cfg.Audit.Output)
 		handler.SetAudit(auditLog)
@@ -113,9 +128,12 @@ func main() {
 		}
 		if authn != nil {
 			handler.SetAuthEnabled(true)
+			collectionHandler.SetAuthEnabled(true)
 			opts.Authenticator = authn
 		}
 	}
+	// Registered after SetAuthEnabled so the routes carry their scope checks.
+	collectionHandler.RegisterRoutes(mux)
 
 	if cfg.RateLimit.Enabled {
 		opts.RateLimiter = auth.NewRateLimiter(auth.RateLimitConfig{
@@ -128,18 +146,11 @@ func main() {
 	root := gateway.Chain(mux, opts)
 
 	addr := fmt.Sprintf(":%d", cfg.Server.HTTPPort)
-	server := &http.Server{
-		Addr:              addr,
-		Handler:           root,
-		ReadTimeout:       15 * time.Second,
-		ReadHeaderTimeout: 5 * time.Second,
-		WriteTimeout:      30 * time.Second,
-		IdleTimeout:       60 * time.Second,
-	}
+	server := app.NewHTTPServer(addr, root)
 
 	go func() {
-		slog.Info("Search gateway listening", "addr", addr)
-		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		slog.Info("Search gateway listening", "addr", addr, "tls", cfg.TLS.Enabled)
+		if err := app.ListenAndServe(server, cfg.TLS); err != nil {
 			slog.Error("HTTP server error", "error", err)
 			os.Exit(1)
 		}

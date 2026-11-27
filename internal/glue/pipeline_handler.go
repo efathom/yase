@@ -28,6 +28,11 @@ type PipelineHandler struct {
 	WasmEngine    *pipeline.WasmEngine
 	Threshold     float32 // Semantic chunking similarity threshold
 
+	// Accept, when set, filters records this process should index (e.g. the
+	// records whose URL hashes to this node's shard). Rejected records are
+	// acknowledged without indexing.
+	Accept func(record *ingestionv1.CrawlRecord) bool
+
 	// Deprecated: kept for backward compatibility with NewPipelineHandler.
 	// Prefer using CollectionMgr for engine/embedder resolution.
 	Embedder embedder.Embedder
@@ -98,6 +103,9 @@ func (p *PipelineHandler) Handle(ctx context.Context, msg kafka.Message) error {
 	}
 	if record.Url == "" {
 		return Permanent(fmt.Errorf("crawl record has no url"))
+	}
+	if p.Accept != nil && !p.Accept(&record) {
+		return nil // belongs to another shard
 	}
 
 	markdown := string(record.RawContent)

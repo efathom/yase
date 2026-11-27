@@ -24,12 +24,31 @@ type SearchCache struct {
 	eviction     *list.List
 	maxSize      int
 	ttl          time.Duration
+	generation   func() uint64 // nil = no generation check
 }
 
 type searchCacheEntry struct {
-	key       string
-	results   []index.ScoredResult
-	createdAt time.Time
+	key        string
+	results    []index.ScoredResult
+	createdAt  time.Time
+	generation uint64
+}
+
+// SetGeneration makes entries expire as soon as the index changes: fn returns
+// a counter that the index bumps on every write, and entries recorded under
+// an older value are treated as misses.
+func (c *SearchCache) SetGeneration(fn func() uint64) *SearchCache {
+	c.mu.Lock()
+	c.generation = fn
+	c.mu.Unlock()
+	return c
+}
+
+func (c *SearchCache) currentGen() uint64 {
+	if c.generation == nil {
+		return 0
+	}
+	return c.generation()
 }
 
 // NewSearchCache creates a search result cache scoped to a collection ID.
@@ -64,7 +83,7 @@ func (c *SearchCache) Get(query string, filters map[string]string, topK int) []i
 	}
 
 	entry := el.Value.(*searchCacheEntry)
-	if time.Since(entry.createdAt) > c.ttl {
+	if time.Since(entry.createdAt) > c.ttl || entry.generation != c.currentGen() {
 		c.eviction.Remove(el)
 		delete(c.cache, key)
 		metrics.SearchCacheMisses.Inc()
@@ -97,9 +116,10 @@ func (c *SearchCache) Put(query string, filters map[string]string, topK int, res
 	}
 
 	entry := &searchCacheEntry{
-		key:       key,
-		results:   append([]index.ScoredResult(nil), results...),
-		createdAt: time.Now(),
+		key:        key,
+		results:    append([]index.ScoredResult(nil), results...),
+		createdAt:  time.Now(),
+		generation: c.currentGen(),
 	}
 	el := c.eviction.PushFront(entry)
 	c.cache[key] = el

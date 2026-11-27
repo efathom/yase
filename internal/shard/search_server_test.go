@@ -128,7 +128,11 @@ func TestRemoteShardSearcherE2E(t *testing.T) {
 
 	// Remote searcher
 	searcher := NewRemoteShardSearcher()
-	searcher.UpdateTopology(addrs)
+	replicas := make(map[uint32][]string, len(addrs))
+	for id, a := range addrs {
+		replicas[id] = []string{a}
+	}
+	searcher.UpdateTopology(replicas)
 	defer searcher.Close()
 
 	// Scatter-gather coordinator with static alias

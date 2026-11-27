@@ -12,6 +12,38 @@ service CollectionService {
   rpc UpdateCollection(UpdateCollectionRequest) returns (CollectionResponse);
   rpc DeleteCollection(DeleteCollectionRequest) returns (DeleteCollectionResponse);
   rpc SearchCollection(CollectionSearchRequest) returns (CollectionSearchResponse);
+  rpc BindConnector(BindConnectorRequest) returns (CollectionResponse);
+  rpc UnbindConnector(BindConnectorRequest) returns (CollectionResponse);
+  rpc CollectionStats(GetCollectionRequest) returns (CollectionStatsResponse);
+}
+
+message EmbedderRef {
+  string provider = 1;
+  string model = 2;
+  string base_url = 3;
+  string api_key = 4;
+  int32 dimension = 5;
+}
+
+message ChunkConfig {
+  string strategy = 1;
+  float threshold = 2;
+  int32 max_tokens = 3;
+}
+
+message BindConnectorRequest {
+  string id = 1;
+  string connector_job_id = 2;
+  string caller_tenant = 3;
+}
+
+message CollectionStatsResponse {
+  string id = 1;
+  int64 hnsw_nodes = 2;
+  int64 centroids = 3;
+  int64 leaves = 4;
+  int64 arena_used_bytes = 5;
+  int64 documents = 6;
 }
 
 message CollectionConfig {
@@ -19,6 +51,8 @@ message CollectionConfig {
   int32 vec_dim = 2;
   int32 centroid_rate = 3;
   string sync_schedule = 4;
+  EmbedderRef embedder = 5;
+  ChunkConfig chunking = 6;
 }
 
 message Collection {
@@ -44,6 +78,7 @@ message CreateCollectionRequest {
 
 message GetCollectionRequest {
   string id = 1;
+  string caller_tenant = 2;
 }
 
 message ListCollectionsRequest {
@@ -58,10 +93,12 @@ message UpdateCollectionRequest {
   string id = 1;
   string name = 2;
   string description = 3;
+  string caller_tenant = 4;
 }
 
 message DeleteCollectionRequest {
   string id = 1;
+  string caller_tenant = 2;
 }
 
 message DeleteCollectionResponse {

@@ -142,12 +142,21 @@ func (x *IngestResponse) GetOk() bool {
 }
 
 type SearchRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Query         string                 `protobuf:"bytes,1,opt,name=query,proto3" json:"query,omitempty"`
-	QueryVector   []float32              `protobuf:"fixed32,2,rep,packed,name=query_vector,json=queryVector,proto3" json:"query_vector,omitempty"`
-	Filters       map[string]string      `protobuf:"bytes,3,rep,name=filters,proto3" json:"filters,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
-	TopK          int32                  `protobuf:"varint,4,opt,name=top_k,json=topK,proto3" json:"top_k,omitempty"`
-	CollectionId  string                 `protobuf:"bytes,5,opt,name=collection_id,json=collectionId,proto3" json:"collection_id,omitempty"` // target collection (empty = _default)
+	state protoimpl.MessageState `protogen:"open.v1"`
+	Query string                 `protobuf:"bytes,1,opt,name=query,proto3" json:"query,omitempty"`
+	// Query embedding. When empty, the index service embeds the query with each
+	// target collection's own embedder (required when collections differ).
+	QueryVector  []float32         `protobuf:"fixed32,2,rep,packed,name=query_vector,json=queryVector,proto3" json:"query_vector,omitempty"`
+	Filters      map[string]string `protobuf:"bytes,3,rep,name=filters,proto3" json:"filters,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	TopK         int32             `protobuf:"varint,4,opt,name=top_k,json=topK,proto3" json:"top_k,omitempty"`
+	CollectionId string            `protobuf:"bytes,5,opt,name=collection_id,json=collectionId,proto3" json:"collection_id,omitempty"` // target collection (empty = _default)
+	// Cross-collection search: search these collections (or all the caller may
+	// access when cross_collection is set and the list is empty).
+	CollectionIds   []string `protobuf:"bytes,6,rep,name=collection_ids,json=collectionIds,proto3" json:"collection_ids,omitempty"`
+	CrossCollection bool     `protobuf:"varint,7,opt,name=cross_collection,json=crossCollection,proto3" json:"cross_collection,omitempty"`
+	// Tenant the (unscoped, service-identity) caller acts for. Ignored when
+	// the authenticated caller is itself tenant-scoped.
+	CallerTenant  string `protobuf:"bytes,8,opt,name=caller_tenant,json=callerTenant,proto3" json:"caller_tenant,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -213,6 +222,27 @@ func (x *SearchRequest) GetTopK() int32 {
 func (x *SearchRequest) GetCollectionId() string {
 	if x != nil {
 		return x.CollectionId
+	}
+	return ""
+}
+
+func (x *SearchRequest) GetCollectionIds() []string {
+	if x != nil {
+		return x.CollectionIds
+	}
+	return nil
+}
+
+func (x *SearchRequest) GetCrossCollection() bool {
+	if x != nil {
+		return x.CrossCollection
+	}
+	return false
+}
+
+func (x *SearchRequest) GetCallerTenant() string {
+	if x != nil {
+		return x.CallerTenant
 	}
 	return ""
 }
@@ -339,6 +369,7 @@ func (x *SearchResponse) GetResults() []*ScoredResult {
 
 type StatsRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
+	CollectionId  string                 `protobuf:"bytes,1,opt,name=collection_id,json=collectionId,proto3" json:"collection_id,omitempty"` // empty = _default
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -373,12 +404,21 @@ func (*StatsRequest) Descriptor() ([]byte, []int) {
 	return file_proto_v1_index_proto_rawDescGZIP(), []int{5}
 }
 
+func (x *StatsRequest) GetCollectionId() string {
+	if x != nil {
+		return x.CollectionId
+	}
+	return ""
+}
+
 type StatsResponse struct {
 	state          protoimpl.MessageState `protogen:"open.v1"`
 	HnswNodes      int64                  `protobuf:"varint,1,opt,name=hnsw_nodes,json=hnswNodes,proto3" json:"hnsw_nodes,omitempty"`
 	ArenaUsedBytes int64                  `protobuf:"varint,2,opt,name=arena_used_bytes,json=arenaUsedBytes,proto3" json:"arena_used_bytes,omitempty"`
 	Centroids      int64                  `protobuf:"varint,3,opt,name=centroids,proto3" json:"centroids,omitempty"`
 	Leaves         int64                  `protobuf:"varint,4,opt,name=leaves,proto3" json:"leaves,omitempty"`
+	Generation     uint64                 `protobuf:"varint,5,opt,name=generation,proto3" json:"generation,omitempty"` // changes on every write (cache invalidation)
+	Documents      int64                  `protobuf:"varint,6,opt,name=documents,proto3" json:"documents,omitempty"`
 	unknownFields  protoimpl.UnknownFields
 	sizeCache      protoimpl.SizeCache
 }
@@ -441,6 +481,296 @@ func (x *StatsResponse) GetLeaves() int64 {
 	return 0
 }
 
+func (x *StatsResponse) GetGeneration() uint64 {
+	if x != nil {
+		return x.Generation
+	}
+	return 0
+}
+
+func (x *StatsResponse) GetDocuments() int64 {
+	if x != nil {
+		return x.Documents
+	}
+	return 0
+}
+
+type Document struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Id            uint32                 `protobuf:"varint,1,opt,name=id,proto3" json:"id,omitempty"`
+	Content       string                 `protobuf:"bytes,2,opt,name=content,proto3" json:"content,omitempty"`
+	Metadata      map[string]string      `protobuf:"bytes,3,rep,name=metadata,proto3" json:"metadata,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *Document) Reset() {
+	*x = Document{}
+	mi := &file_proto_v1_index_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *Document) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*Document) ProtoMessage() {}
+
+func (x *Document) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_v1_index_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use Document.ProtoReflect.Descriptor instead.
+func (*Document) Descriptor() ([]byte, []int) {
+	return file_proto_v1_index_proto_rawDescGZIP(), []int{7}
+}
+
+func (x *Document) GetId() uint32 {
+	if x != nil {
+		return x.Id
+	}
+	return 0
+}
+
+func (x *Document) GetContent() string {
+	if x != nil {
+		return x.Content
+	}
+	return ""
+}
+
+func (x *Document) GetMetadata() map[string]string {
+	if x != nil {
+		return x.Metadata
+	}
+	return nil
+}
+
+type GetDocumentsRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	CollectionId  string                 `protobuf:"bytes,1,opt,name=collection_id,json=collectionId,proto3" json:"collection_id,omitempty"`
+	Ids           []uint32               `protobuf:"varint,2,rep,packed,name=ids,proto3" json:"ids,omitempty"`
+	CallerTenant  string                 `protobuf:"bytes,3,opt,name=caller_tenant,json=callerTenant,proto3" json:"caller_tenant,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetDocumentsRequest) Reset() {
+	*x = GetDocumentsRequest{}
+	mi := &file_proto_v1_index_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetDocumentsRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetDocumentsRequest) ProtoMessage() {}
+
+func (x *GetDocumentsRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_v1_index_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetDocumentsRequest.ProtoReflect.Descriptor instead.
+func (*GetDocumentsRequest) Descriptor() ([]byte, []int) {
+	return file_proto_v1_index_proto_rawDescGZIP(), []int{8}
+}
+
+func (x *GetDocumentsRequest) GetCollectionId() string {
+	if x != nil {
+		return x.CollectionId
+	}
+	return ""
+}
+
+func (x *GetDocumentsRequest) GetIds() []uint32 {
+	if x != nil {
+		return x.Ids
+	}
+	return nil
+}
+
+func (x *GetDocumentsRequest) GetCallerTenant() string {
+	if x != nil {
+		return x.CallerTenant
+	}
+	return ""
+}
+
+type GetDocumentsResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Documents     []*Document            `protobuf:"bytes,1,rep,name=documents,proto3" json:"documents,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetDocumentsResponse) Reset() {
+	*x = GetDocumentsResponse{}
+	mi := &file_proto_v1_index_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetDocumentsResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetDocumentsResponse) ProtoMessage() {}
+
+func (x *GetDocumentsResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_v1_index_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetDocumentsResponse.ProtoReflect.Descriptor instead.
+func (*GetDocumentsResponse) Descriptor() ([]byte, []int) {
+	return file_proto_v1_index_proto_rawDescGZIP(), []int{9}
+}
+
+func (x *GetDocumentsResponse) GetDocuments() []*Document {
+	if x != nil {
+		return x.Documents
+	}
+	return nil
+}
+
+type DeleteDocumentsRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	CollectionId  string                 `protobuf:"bytes,1,opt,name=collection_id,json=collectionId,proto3" json:"collection_id,omitempty"`
+	Ids           []uint32               `protobuf:"varint,2,rep,packed,name=ids,proto3" json:"ids,omitempty"`                                                                           // delete by ID (constrained by filters)
+	Filters       map[string]string      `protobuf:"bytes,3,rep,name=filters,proto3" json:"filters,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"` // delete by filter when ids is empty
+	CallerTenant  string                 `protobuf:"bytes,4,opt,name=caller_tenant,json=callerTenant,proto3" json:"caller_tenant,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DeleteDocumentsRequest) Reset() {
+	*x = DeleteDocumentsRequest{}
+	mi := &file_proto_v1_index_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DeleteDocumentsRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DeleteDocumentsRequest) ProtoMessage() {}
+
+func (x *DeleteDocumentsRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_v1_index_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DeleteDocumentsRequest.ProtoReflect.Descriptor instead.
+func (*DeleteDocumentsRequest) Descriptor() ([]byte, []int) {
+	return file_proto_v1_index_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *DeleteDocumentsRequest) GetCollectionId() string {
+	if x != nil {
+		return x.CollectionId
+	}
+	return ""
+}
+
+func (x *DeleteDocumentsRequest) GetIds() []uint32 {
+	if x != nil {
+		return x.Ids
+	}
+	return nil
+}
+
+func (x *DeleteDocumentsRequest) GetFilters() map[string]string {
+	if x != nil {
+		return x.Filters
+	}
+	return nil
+}
+
+func (x *DeleteDocumentsRequest) GetCallerTenant() string {
+	if x != nil {
+		return x.CallerTenant
+	}
+	return ""
+}
+
+type DeleteDocumentsResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Deleted       int64                  `protobuf:"varint,1,opt,name=deleted,proto3" json:"deleted,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DeleteDocumentsResponse) Reset() {
+	*x = DeleteDocumentsResponse{}
+	mi := &file_proto_v1_index_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DeleteDocumentsResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DeleteDocumentsResponse) ProtoMessage() {}
+
+func (x *DeleteDocumentsResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_v1_index_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DeleteDocumentsResponse.ProtoReflect.Descriptor instead.
+func (*DeleteDocumentsResponse) Descriptor() ([]byte, []int) {
+	return file_proto_v1_index_proto_rawDescGZIP(), []int{11}
+}
+
+func (x *DeleteDocumentsResponse) GetDeleted() int64 {
+	if x != nil {
+		return x.Deleted
+	}
+	return 0
+}
+
 type ShardSearchRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	ShardId       uint32                 `protobuf:"varint,1,opt,name=shard_id,json=shardId,proto3" json:"shard_id,omitempty"`
@@ -455,7 +785,7 @@ type ShardSearchRequest struct {
 
 func (x *ShardSearchRequest) Reset() {
 	*x = ShardSearchRequest{}
-	mi := &file_proto_v1_index_proto_msgTypes[7]
+	mi := &file_proto_v1_index_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -467,7 +797,7 @@ func (x *ShardSearchRequest) String() string {
 func (*ShardSearchRequest) ProtoMessage() {}
 
 func (x *ShardSearchRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_v1_index_proto_msgTypes[7]
+	mi := &file_proto_v1_index_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -480,7 +810,7 @@ func (x *ShardSearchRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ShardSearchRequest.ProtoReflect.Descriptor instead.
 func (*ShardSearchRequest) Descriptor() ([]byte, []int) {
-	return file_proto_v1_index_proto_rawDescGZIP(), []int{7}
+	return file_proto_v1_index_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *ShardSearchRequest) GetShardId() uint32 {
@@ -535,7 +865,7 @@ type ShardSearchResponse struct {
 
 func (x *ShardSearchResponse) Reset() {
 	*x = ShardSearchResponse{}
-	mi := &file_proto_v1_index_proto_msgTypes[8]
+	mi := &file_proto_v1_index_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -547,7 +877,7 @@ func (x *ShardSearchResponse) String() string {
 func (*ShardSearchResponse) ProtoMessage() {}
 
 func (x *ShardSearchResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_v1_index_proto_msgTypes[8]
+	mi := &file_proto_v1_index_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -560,7 +890,7 @@ func (x *ShardSearchResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ShardSearchResponse.ProtoReflect.Descriptor instead.
 func (*ShardSearchResponse) Descriptor() ([]byte, []int) {
-	return file_proto_v1_index_proto_rawDescGZIP(), []int{8}
+	return file_proto_v1_index_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *ShardSearchResponse) GetResults() []*ScoredResult {
@@ -592,13 +922,16 @@ const file_proto_v1_index_proto_rawDesc = "" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\" \n" +
 	"\x0eIngestResponse\x12\x0e\n" +
-	"\x02ok\x18\x01 \x01(\bR\x02ok\"\x87\x02\n" +
+	"\x02ok\x18\x01 \x01(\bR\x02ok\"\xfe\x02\n" +
 	"\rSearchRequest\x12\x14\n" +
 	"\x05query\x18\x01 \x01(\tR\x05query\x12!\n" +
 	"\fquery_vector\x18\x02 \x03(\x02R\vqueryVector\x12G\n" +
 	"\afilters\x18\x03 \x03(\v2-.yase.ingestion.v1.SearchRequest.FiltersEntryR\afilters\x12\x13\n" +
 	"\x05top_k\x18\x04 \x01(\x05R\x04topK\x12#\n" +
-	"\rcollection_id\x18\x05 \x01(\tR\fcollectionId\x1a:\n" +
+	"\rcollection_id\x18\x05 \x01(\tR\fcollectionId\x12%\n" +
+	"\x0ecollection_ids\x18\x06 \x03(\tR\rcollectionIds\x12)\n" +
+	"\x10cross_collection\x18\a \x01(\bR\x0fcrossCollection\x12#\n" +
+	"\rcaller_tenant\x18\b \x01(\tR\fcallerTenant\x1a:\n" +
 	"\fFiltersEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xaa\x01\n" +
@@ -611,14 +944,42 @@ const file_proto_v1_index_proto_rawDesc = "" +
 	"\x0esemantic_score\x18\x04 \x01(\x02R\rsemanticScore\x12#\n" +
 	"\rcollection_id\x18\x05 \x01(\tR\fcollectionId\"K\n" +
 	"\x0eSearchResponse\x129\n" +
-	"\aresults\x18\x01 \x03(\v2\x1f.yase.ingestion.v1.ScoredResultR\aresults\"\x0e\n" +
-	"\fStatsRequest\"\x8e\x01\n" +
+	"\aresults\x18\x01 \x03(\v2\x1f.yase.ingestion.v1.ScoredResultR\aresults\"3\n" +
+	"\fStatsRequest\x12#\n" +
+	"\rcollection_id\x18\x01 \x01(\tR\fcollectionId\"\xcc\x01\n" +
 	"\rStatsResponse\x12\x1d\n" +
 	"\n" +
 	"hnsw_nodes\x18\x01 \x01(\x03R\thnswNodes\x12(\n" +
 	"\x10arena_used_bytes\x18\x02 \x01(\x03R\x0earenaUsedBytes\x12\x1c\n" +
 	"\tcentroids\x18\x03 \x01(\x03R\tcentroids\x12\x16\n" +
-	"\x06leaves\x18\x04 \x01(\x03R\x06leaves\"\xac\x02\n" +
+	"\x06leaves\x18\x04 \x01(\x03R\x06leaves\x12\x1e\n" +
+	"\n" +
+	"generation\x18\x05 \x01(\x04R\n" +
+	"generation\x12\x1c\n" +
+	"\tdocuments\x18\x06 \x01(\x03R\tdocuments\"\xb8\x01\n" +
+	"\bDocument\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\rR\x02id\x12\x18\n" +
+	"\acontent\x18\x02 \x01(\tR\acontent\x12E\n" +
+	"\bmetadata\x18\x03 \x03(\v2).yase.ingestion.v1.Document.MetadataEntryR\bmetadata\x1a;\n" +
+	"\rMetadataEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"q\n" +
+	"\x13GetDocumentsRequest\x12#\n" +
+	"\rcollection_id\x18\x01 \x01(\tR\fcollectionId\x12\x10\n" +
+	"\x03ids\x18\x02 \x03(\rR\x03ids\x12#\n" +
+	"\rcaller_tenant\x18\x03 \x01(\tR\fcallerTenant\"Q\n" +
+	"\x14GetDocumentsResponse\x129\n" +
+	"\tdocuments\x18\x01 \x03(\v2\x1b.yase.ingestion.v1.DocumentR\tdocuments\"\x82\x02\n" +
+	"\x16DeleteDocumentsRequest\x12#\n" +
+	"\rcollection_id\x18\x01 \x01(\tR\fcollectionId\x12\x10\n" +
+	"\x03ids\x18\x02 \x03(\rR\x03ids\x12P\n" +
+	"\afilters\x18\x03 \x03(\v26.yase.ingestion.v1.DeleteDocumentsRequest.FiltersEntryR\afilters\x12#\n" +
+	"\rcaller_tenant\x18\x04 \x01(\tR\fcallerTenant\x1a:\n" +
+	"\fFiltersEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"3\n" +
+	"\x17DeleteDocumentsResponse\x12\x18\n" +
+	"\adeleted\x18\x01 \x01(\x03R\adeleted\"\xac\x02\n" +
 	"\x12ShardSearchRequest\x12\x19\n" +
 	"\bshard_id\x18\x01 \x01(\rR\ashardId\x12\x14\n" +
 	"\x05query\x18\x02 \x01(\tR\x05query\x12!\n" +
@@ -631,11 +992,13 @@ const file_proto_v1_index_proto_rawDesc = "" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"k\n" +
 	"\x13ShardSearchResponse\x129\n" +
 	"\aresults\x18\x01 \x03(\v2\x1f.yase.ingestion.v1.ScoredResultR\aresults\x12\x19\n" +
-	"\bshard_id\x18\x02 \x01(\rR\ashardId2\xf8\x01\n" +
+	"\bshard_id\x18\x02 \x01(\rR\ashardId2\xc3\x03\n" +
 	"\fIndexService\x12M\n" +
 	"\x06Ingest\x12 .yase.ingestion.v1.IngestRequest\x1a!.yase.ingestion.v1.IngestResponse\x12M\n" +
 	"\x06Search\x12 .yase.ingestion.v1.SearchRequest\x1a!.yase.ingestion.v1.SearchResponse\x12J\n" +
-	"\x05Stats\x12\x1f.yase.ingestion.v1.StatsRequest\x1a .yase.ingestion.v1.StatsResponse2r\n" +
+	"\x05Stats\x12\x1f.yase.ingestion.v1.StatsRequest\x1a .yase.ingestion.v1.StatsResponse\x12_\n" +
+	"\fGetDocuments\x12&.yase.ingestion.v1.GetDocumentsRequest\x1a'.yase.ingestion.v1.GetDocumentsResponse\x12h\n" +
+	"\x0fDeleteDocuments\x12).yase.ingestion.v1.DeleteDocumentsRequest\x1a*.yase.ingestion.v1.DeleteDocumentsResponse2r\n" +
 	"\x12ShardSearchService\x12\\\n" +
 	"\vSearchShard\x12%.yase.ingestion.v1.ShardSearchRequest\x1a&.yase.ingestion.v1.ShardSearchResponseB.Z,github.com/efathom/yase/proto/v1;ingestionv1b\x06proto3"
 
@@ -651,40 +1014,54 @@ func file_proto_v1_index_proto_rawDescGZIP() []byte {
 	return file_proto_v1_index_proto_rawDescData
 }
 
-var file_proto_v1_index_proto_msgTypes = make([]protoimpl.MessageInfo, 12)
+var file_proto_v1_index_proto_msgTypes = make([]protoimpl.MessageInfo, 19)
 var file_proto_v1_index_proto_goTypes = []any{
-	(*IngestRequest)(nil),       // 0: yase.ingestion.v1.IngestRequest
-	(*IngestResponse)(nil),      // 1: yase.ingestion.v1.IngestResponse
-	(*SearchRequest)(nil),       // 2: yase.ingestion.v1.SearchRequest
-	(*ScoredResult)(nil),        // 3: yase.ingestion.v1.ScoredResult
-	(*SearchResponse)(nil),      // 4: yase.ingestion.v1.SearchResponse
-	(*StatsRequest)(nil),        // 5: yase.ingestion.v1.StatsRequest
-	(*StatsResponse)(nil),       // 6: yase.ingestion.v1.StatsResponse
-	(*ShardSearchRequest)(nil),  // 7: yase.ingestion.v1.ShardSearchRequest
-	(*ShardSearchResponse)(nil), // 8: yase.ingestion.v1.ShardSearchResponse
-	nil,                         // 9: yase.ingestion.v1.IngestRequest.MetadataEntry
-	nil,                         // 10: yase.ingestion.v1.SearchRequest.FiltersEntry
-	nil,                         // 11: yase.ingestion.v1.ShardSearchRequest.FiltersEntry
+	(*IngestRequest)(nil),           // 0: yase.ingestion.v1.IngestRequest
+	(*IngestResponse)(nil),          // 1: yase.ingestion.v1.IngestResponse
+	(*SearchRequest)(nil),           // 2: yase.ingestion.v1.SearchRequest
+	(*ScoredResult)(nil),            // 3: yase.ingestion.v1.ScoredResult
+	(*SearchResponse)(nil),          // 4: yase.ingestion.v1.SearchResponse
+	(*StatsRequest)(nil),            // 5: yase.ingestion.v1.StatsRequest
+	(*StatsResponse)(nil),           // 6: yase.ingestion.v1.StatsResponse
+	(*Document)(nil),                // 7: yase.ingestion.v1.Document
+	(*GetDocumentsRequest)(nil),     // 8: yase.ingestion.v1.GetDocumentsRequest
+	(*GetDocumentsResponse)(nil),    // 9: yase.ingestion.v1.GetDocumentsResponse
+	(*DeleteDocumentsRequest)(nil),  // 10: yase.ingestion.v1.DeleteDocumentsRequest
+	(*DeleteDocumentsResponse)(nil), // 11: yase.ingestion.v1.DeleteDocumentsResponse
+	(*ShardSearchRequest)(nil),      // 12: yase.ingestion.v1.ShardSearchRequest
+	(*ShardSearchResponse)(nil),     // 13: yase.ingestion.v1.ShardSearchResponse
+	nil,                             // 14: yase.ingestion.v1.IngestRequest.MetadataEntry
+	nil,                             // 15: yase.ingestion.v1.SearchRequest.FiltersEntry
+	nil,                             // 16: yase.ingestion.v1.Document.MetadataEntry
+	nil,                             // 17: yase.ingestion.v1.DeleteDocumentsRequest.FiltersEntry
+	nil,                             // 18: yase.ingestion.v1.ShardSearchRequest.FiltersEntry
 }
 var file_proto_v1_index_proto_depIdxs = []int32{
-	9,  // 0: yase.ingestion.v1.IngestRequest.metadata:type_name -> yase.ingestion.v1.IngestRequest.MetadataEntry
-	10, // 1: yase.ingestion.v1.SearchRequest.filters:type_name -> yase.ingestion.v1.SearchRequest.FiltersEntry
+	14, // 0: yase.ingestion.v1.IngestRequest.metadata:type_name -> yase.ingestion.v1.IngestRequest.MetadataEntry
+	15, // 1: yase.ingestion.v1.SearchRequest.filters:type_name -> yase.ingestion.v1.SearchRequest.FiltersEntry
 	3,  // 2: yase.ingestion.v1.SearchResponse.results:type_name -> yase.ingestion.v1.ScoredResult
-	11, // 3: yase.ingestion.v1.ShardSearchRequest.filters:type_name -> yase.ingestion.v1.ShardSearchRequest.FiltersEntry
-	3,  // 4: yase.ingestion.v1.ShardSearchResponse.results:type_name -> yase.ingestion.v1.ScoredResult
-	0,  // 5: yase.ingestion.v1.IndexService.Ingest:input_type -> yase.ingestion.v1.IngestRequest
-	2,  // 6: yase.ingestion.v1.IndexService.Search:input_type -> yase.ingestion.v1.SearchRequest
-	5,  // 7: yase.ingestion.v1.IndexService.Stats:input_type -> yase.ingestion.v1.StatsRequest
-	7,  // 8: yase.ingestion.v1.ShardSearchService.SearchShard:input_type -> yase.ingestion.v1.ShardSearchRequest
-	1,  // 9: yase.ingestion.v1.IndexService.Ingest:output_type -> yase.ingestion.v1.IngestResponse
-	4,  // 10: yase.ingestion.v1.IndexService.Search:output_type -> yase.ingestion.v1.SearchResponse
-	6,  // 11: yase.ingestion.v1.IndexService.Stats:output_type -> yase.ingestion.v1.StatsResponse
-	8,  // 12: yase.ingestion.v1.ShardSearchService.SearchShard:output_type -> yase.ingestion.v1.ShardSearchResponse
-	9,  // [9:13] is the sub-list for method output_type
-	5,  // [5:9] is the sub-list for method input_type
-	5,  // [5:5] is the sub-list for extension type_name
-	5,  // [5:5] is the sub-list for extension extendee
-	0,  // [0:5] is the sub-list for field type_name
+	16, // 3: yase.ingestion.v1.Document.metadata:type_name -> yase.ingestion.v1.Document.MetadataEntry
+	7,  // 4: yase.ingestion.v1.GetDocumentsResponse.documents:type_name -> yase.ingestion.v1.Document
+	17, // 5: yase.ingestion.v1.DeleteDocumentsRequest.filters:type_name -> yase.ingestion.v1.DeleteDocumentsRequest.FiltersEntry
+	18, // 6: yase.ingestion.v1.ShardSearchRequest.filters:type_name -> yase.ingestion.v1.ShardSearchRequest.FiltersEntry
+	3,  // 7: yase.ingestion.v1.ShardSearchResponse.results:type_name -> yase.ingestion.v1.ScoredResult
+	0,  // 8: yase.ingestion.v1.IndexService.Ingest:input_type -> yase.ingestion.v1.IngestRequest
+	2,  // 9: yase.ingestion.v1.IndexService.Search:input_type -> yase.ingestion.v1.SearchRequest
+	5,  // 10: yase.ingestion.v1.IndexService.Stats:input_type -> yase.ingestion.v1.StatsRequest
+	8,  // 11: yase.ingestion.v1.IndexService.GetDocuments:input_type -> yase.ingestion.v1.GetDocumentsRequest
+	10, // 12: yase.ingestion.v1.IndexService.DeleteDocuments:input_type -> yase.ingestion.v1.DeleteDocumentsRequest
+	12, // 13: yase.ingestion.v1.ShardSearchService.SearchShard:input_type -> yase.ingestion.v1.ShardSearchRequest
+	1,  // 14: yase.ingestion.v1.IndexService.Ingest:output_type -> yase.ingestion.v1.IngestResponse
+	4,  // 15: yase.ingestion.v1.IndexService.Search:output_type -> yase.ingestion.v1.SearchResponse
+	6,  // 16: yase.ingestion.v1.IndexService.Stats:output_type -> yase.ingestion.v1.StatsResponse
+	9,  // 17: yase.ingestion.v1.IndexService.GetDocuments:output_type -> yase.ingestion.v1.GetDocumentsResponse
+	11, // 18: yase.ingestion.v1.IndexService.DeleteDocuments:output_type -> yase.ingestion.v1.DeleteDocumentsResponse
+	13, // 19: yase.ingestion.v1.ShardSearchService.SearchShard:output_type -> yase.ingestion.v1.ShardSearchResponse
+	14, // [14:20] is the sub-list for method output_type
+	8,  // [8:14] is the sub-list for method input_type
+	8,  // [8:8] is the sub-list for extension type_name
+	8,  // [8:8] is the sub-list for extension extendee
+	0,  // [0:8] is the sub-list for field type_name
 }
 
 func init() { file_proto_v1_index_proto_init() }
@@ -698,7 +1075,7 @@ func file_proto_v1_index_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_proto_v1_index_proto_rawDesc), len(file_proto_v1_index_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   12,
+			NumMessages:   19,
 			NumExtensions: 0,
 			NumServices:   2,
 		},

@@ -19,9 +19,11 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	IndexService_Ingest_FullMethodName = "/yase.ingestion.v1.IndexService/Ingest"
-	IndexService_Search_FullMethodName = "/yase.ingestion.v1.IndexService/Search"
-	IndexService_Stats_FullMethodName  = "/yase.ingestion.v1.IndexService/Stats"
+	IndexService_Ingest_FullMethodName          = "/yase.ingestion.v1.IndexService/Ingest"
+	IndexService_Search_FullMethodName          = "/yase.ingestion.v1.IndexService/Search"
+	IndexService_Stats_FullMethodName           = "/yase.ingestion.v1.IndexService/Stats"
+	IndexService_GetDocuments_FullMethodName    = "/yase.ingestion.v1.IndexService/GetDocuments"
+	IndexService_DeleteDocuments_FullMethodName = "/yase.ingestion.v1.IndexService/DeleteDocuments"
 )
 
 // IndexServiceClient is the client API for IndexService service.
@@ -37,6 +39,10 @@ type IndexServiceClient interface {
 	Search(ctx context.Context, in *SearchRequest, opts ...grpc.CallOption) (*SearchResponse, error)
 	// Stats returns index health information.
 	Stats(ctx context.Context, in *StatsRequest, opts ...grpc.CallOption) (*StatsResponse, error)
+	// GetDocuments returns stored content + metadata (RAG citations).
+	GetDocuments(ctx context.Context, in *GetDocumentsRequest, opts ...grpc.CallOption) (*GetDocumentsResponse, error)
+	// DeleteDocuments removes documents by ID or by metadata filter.
+	DeleteDocuments(ctx context.Context, in *DeleteDocumentsRequest, opts ...grpc.CallOption) (*DeleteDocumentsResponse, error)
 }
 
 type indexServiceClient struct {
@@ -77,6 +83,26 @@ func (c *indexServiceClient) Stats(ctx context.Context, in *StatsRequest, opts .
 	return out, nil
 }
 
+func (c *indexServiceClient) GetDocuments(ctx context.Context, in *GetDocumentsRequest, opts ...grpc.CallOption) (*GetDocumentsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetDocumentsResponse)
+	err := c.cc.Invoke(ctx, IndexService_GetDocuments_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *indexServiceClient) DeleteDocuments(ctx context.Context, in *DeleteDocumentsRequest, opts ...grpc.CallOption) (*DeleteDocumentsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(DeleteDocumentsResponse)
+	err := c.cc.Invoke(ctx, IndexService_DeleteDocuments_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // IndexServiceServer is the server API for IndexService service.
 // All implementations must embed UnimplementedIndexServiceServer
 // for forward compatibility.
@@ -90,6 +116,10 @@ type IndexServiceServer interface {
 	Search(context.Context, *SearchRequest) (*SearchResponse, error)
 	// Stats returns index health information.
 	Stats(context.Context, *StatsRequest) (*StatsResponse, error)
+	// GetDocuments returns stored content + metadata (RAG citations).
+	GetDocuments(context.Context, *GetDocumentsRequest) (*GetDocumentsResponse, error)
+	// DeleteDocuments removes documents by ID or by metadata filter.
+	DeleteDocuments(context.Context, *DeleteDocumentsRequest) (*DeleteDocumentsResponse, error)
 	mustEmbedUnimplementedIndexServiceServer()
 }
 
@@ -108,6 +138,12 @@ func (UnimplementedIndexServiceServer) Search(context.Context, *SearchRequest) (
 }
 func (UnimplementedIndexServiceServer) Stats(context.Context, *StatsRequest) (*StatsResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method Stats not implemented")
+}
+func (UnimplementedIndexServiceServer) GetDocuments(context.Context, *GetDocumentsRequest) (*GetDocumentsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetDocuments not implemented")
+}
+func (UnimplementedIndexServiceServer) DeleteDocuments(context.Context, *DeleteDocumentsRequest) (*DeleteDocumentsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method DeleteDocuments not implemented")
 }
 func (UnimplementedIndexServiceServer) mustEmbedUnimplementedIndexServiceServer() {}
 func (UnimplementedIndexServiceServer) testEmbeddedByValue()                      {}
@@ -184,6 +220,42 @@ func _IndexService_Stats_Handler(srv interface{}, ctx context.Context, dec func(
 	return interceptor(ctx, in, info, handler)
 }
 
+func _IndexService_GetDocuments_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetDocumentsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IndexServiceServer).GetDocuments(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: IndexService_GetDocuments_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IndexServiceServer).GetDocuments(ctx, req.(*GetDocumentsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _IndexService_DeleteDocuments_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DeleteDocumentsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IndexServiceServer).DeleteDocuments(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: IndexService_DeleteDocuments_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IndexServiceServer).DeleteDocuments(ctx, req.(*DeleteDocumentsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // IndexService_ServiceDesc is the grpc.ServiceDesc for IndexService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -202,6 +274,14 @@ var IndexService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Stats",
 			Handler:    _IndexService_Stats_Handler,
+		},
+		{
+			MethodName: "GetDocuments",
+			Handler:    _IndexService_GetDocuments_Handler,
+		},
+		{
+			MethodName: "DeleteDocuments",
+			Handler:    _IndexService_DeleteDocuments_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

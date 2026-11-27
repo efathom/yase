@@ -66,6 +66,15 @@ type ClusterConfig struct {
 	Bootstrap bool   `mapstructure:"bootstrap"`
 	JoinAddr  string `mapstructure:"join_addr"`  // leader address to join
 	ShardPort int    `mapstructure:"shard_port"` // gRPC port for ShardSearchService
+
+	// HTTPAddr is the cluster management API listen address. Defaults to
+	// loopback; a routable address requires JoinToken.
+	HTTPAddr string `mapstructure:"http_addr"`
+	// JoinToken is the shared secret required by the cluster management API
+	// (join, leave, alias and shard changes).
+	JoinToken string `mapstructure:"join_token"`
+	// NumShards is the number of logical shards documents are hashed into.
+	NumShards int `mapstructure:"num_shards"`
 }
 
 type ServerConfig struct {
@@ -74,6 +83,14 @@ type ServerConfig struct {
 	HTTPPort       int           `mapstructure:"http_port"`
 	MaxRecvMsgSize int           `mapstructure:"max_recv_msg_size"`
 	ShutdownGrace  time.Duration `mapstructure:"shutdown_grace"`
+
+	// TrustedProxies lists proxy CIDRs/IPs whose X-Forwarded-For header is
+	// believed for client IPs (audit logs). Empty: the header is ignored.
+	TrustedProxies []string `mapstructure:"trusted_proxies"`
+
+	// HealthPort serves /health and /ready on processes without a public
+	// HTTP API (indexer, cluster node). 0 disables it.
+	HealthPort int `mapstructure:"health_port"`
 }
 
 type KafkaConfig struct {
@@ -86,6 +103,10 @@ type KafkaConfig struct {
 	BatchTimeout      time.Duration `mapstructure:"batch_timeout"`
 	RequiredAcks      int           `mapstructure:"required_acks"`
 	DLQTopic          string        `mapstructure:"dlq_topic"` // dead-letter topic ("" = disabled)
+
+	Workers        int           `mapstructure:"workers"`         // concurrent indexing workers (per-key ordered)
+	MaxAttempts    int           `mapstructure:"max_attempts"`    // attempts before dead-lettering
+	CommitInterval time.Duration `mapstructure:"commit_interval"` // checkpoint + offset commit cadence
 }
 
 type RedisConfig struct {
@@ -108,6 +129,12 @@ type IndexConfig struct {
 	CentroidRate int    `mapstructure:"centroid_rate"`
 	GRPCHost     string `mapstructure:"grpc_host"`
 	GRPCPort     int    `mapstructure:"grpc_port"`
+
+	CheckpointInterval time.Duration `mapstructure:"checkpoint_interval"` // periodic durable snapshot
+	CompactDeadRatio   float64       `mapstructure:"compact_dead_ratio"`  // compact when dead/used exceeds this
+	DefaultTTL         time.Duration `mapstructure:"default_ttl"`         // 0 = documents never expire by default
+	TTLSweepInterval   time.Duration `mapstructure:"ttl_sweep_interval"`
+	FlatSearchMax      int           `mapstructure:"flat_search_max"` // filters matching <= this many docs are searched exactly
 }
 
 type CrawlerConfig struct {
@@ -248,6 +275,7 @@ func Load(configPath string) (*Config, error) {
 	v.SetDefault("server.http_port", 8000)
 	v.SetDefault("server.max_recv_msg_size", 16*1024*1024) // 16MB
 	v.SetDefault("server.shutdown_grace", "15s")
+	v.SetDefault("server.health_port", 8090)
 
 	// Kafka defaults
 	v.SetDefault("kafka.brokers", []string{"localhost:9092"})
@@ -259,6 +287,9 @@ func Load(configPath string) (*Config, error) {
 	v.SetDefault("kafka.batch_timeout", "10ms")
 	v.SetDefault("kafka.required_acks", -1) // all ISR
 	v.SetDefault("kafka.dlq_topic", "")
+	v.SetDefault("kafka.workers", 4)
+	v.SetDefault("kafka.max_attempts", 3)
+	v.SetDefault("kafka.commit_interval", "5s")
 
 	// Redis defaults
 	v.SetDefault("redis.addr", "localhost:6379")
@@ -274,10 +305,15 @@ func Load(configPath string) (*Config, error) {
 
 	// Index defaults
 	v.SetDefault("index.path", "/data/yase/bluge")
-	v.SetDefault("index.arena_size_bytes", uint64(4*1024*1024*1024)) // 4GB
-	v.SetDefault("index.centroid_rate", 5)                           // 20% centroids
+	v.SetDefault("index.arena_size_bytes", uint64(64<<30)) // upper bound; grows on demand
+	v.SetDefault("index.centroid_rate", 5)                 // 20% centroids
 	v.SetDefault("index.grpc_host", "localhost")
 	v.SetDefault("index.grpc_port", 50052)
+	v.SetDefault("index.checkpoint_interval", "1m")
+	v.SetDefault("index.compact_dead_ratio", 0.3)
+	v.SetDefault("index.default_ttl", "0s")
+	v.SetDefault("index.ttl_sweep_interval", "10m")
+	v.SetDefault("index.flat_search_max", 20000)
 
 	// Crawler defaults
 	v.SetDefault("crawler.max_workers", 2000)
@@ -311,7 +347,7 @@ func Load(configPath string) (*Config, error) {
 
 	// Collection defaults
 	v.SetDefault("collections.base_path", "/data/yase/collections")
-	v.SetDefault("collections.default_arena", uint64(1<<30)) // 1GB per collection
+	v.SetDefault("collections.default_arena", uint64(64<<30)) // per-collection upper bound; grows on demand
 	v.SetDefault("collections.max_collections", 100)
 	v.SetDefault("collections.default_collection", "_default")
 
@@ -329,6 +365,8 @@ func Load(configPath string) (*Config, error) {
 	v.SetDefault("cluster.bootstrap", false)
 	v.SetDefault("cluster.join_addr", "")
 	v.SetDefault("cluster.shard_port", 50053)
+	v.SetDefault("cluster.http_addr", "127.0.0.1:7080")
+	v.SetDefault("cluster.num_shards", 3)
 
 	// Audit defaults
 	v.SetDefault("audit.enabled", false)
