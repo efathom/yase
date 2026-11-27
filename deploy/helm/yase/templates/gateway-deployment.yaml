@@ -21,6 +21,8 @@ spec:
         prometheus.io/port: "{{ .Values.metrics.port }}"
     spec:
       serviceAccountName: {{ include "yase.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
       containers:
         - name: gateway
           image: "{{ .Values.image.repository }}/gateway:{{ .Values.image.tag }}"
@@ -45,10 +47,21 @@ spec:
               value: "{{ .Values.indexer.port }}"
             - name: YASE_METRICS_ADDR
               value: ":{{ .Values.metrics.port }}"
-            - name: YASE_AUTH_ENABLED
-              value: "{{ .Values.auth.enabled }}"
+            {{- include "yase.authEnv" . | nindent 12 }}
+            - name: YASE_RATE_LIMIT_ENABLED
+              value: "{{ .Values.rateLimit.enabled }}"
+            - name: YASE_RATE_LIMIT_BACKEND
+              value: "{{ .Values.rateLimit.backend }}"
+            - name: YASE_RATE_LIMIT_DEFAULT_SEARCH_QPS
+              value: "{{ .Values.rateLimit.searchQps }}"
+            - name: YASE_REDIS_ADDR
+              value: "{{ .Values.redis.addr }}"
+            - name: YASE_SERVER_TRUSTED_PROXIES
+              value: "{{ join "," .Values.server.trustedProxies }}"
           resources:
             {{- toYaml .Values.gateway.resources | nindent 12 }}
+          securityContext:
+            {{- toYaml .Values.containerSecurityContext | nindent 12 }}
           livenessProbe:
             httpGet:
               path: /health

@@ -17,6 +17,31 @@ import (
 // to search approximately and post-check.
 var FlatSearchThreshold = 20000
 
+// probesFor returns how many centroids to probe. Recall depends on the
+// fraction of centroids probed, so the default scales with the centroid
+// count (a fixed cap of 100 probes fell to recall@10 ≈ 0.64 at 100k
+// documents). Measured on clustered data: centroids/16 keeps recall@10
+// ≥ 0.95 from 5k to 100k documents.
+func probesFor(numCentroids, topK, override int) int {
+	if override > 0 {
+		return override
+	}
+	p := numCentroids / 16
+	if p < topK*20 {
+		p = topK * 20
+	}
+	if p < 64 {
+		p = 64
+	}
+	if p > 4096 {
+		p = 4096
+	}
+	if p > numCentroids {
+		p = numCentroids
+	}
+	return p
+}
+
 // lexicalCandidates is how many top BM25 hits are injected into the candidate
 // pool regardless of their vector distance, so strong keyword matches are
 // never lost just because they are semantically far from the query.
@@ -100,7 +125,7 @@ func (he *HybridEngine) HybridSearch(
 			cand[id] = struct{}{}
 		}
 	} else {
-		he.annCandidates(q, filtered, cand)
+		he.annCandidates(q, topK, filtered, cand)
 		if filtered {
 			// Broad filter: keep only ANN candidates that satisfy it. BM25
 			// hits were produced under the filter and need no check.
@@ -167,18 +192,12 @@ func (he *HybridEngine) HybridSearch(
 }
 
 // annCandidates adds centroid and inverted-file members near q to cand.
-func (he *HybridEngine) annCandidates(q []float32, filtered bool, cand map[uint32]struct{}) {
+func (he *HybridEngine) annCandidates(q []float32, topK int, filtered bool, cand map[uint32]struct{}) {
 	numCentroids := he.Graph.Len()
 	if numCentroids == 0 {
 		return
 	}
-	target := numCentroids / 10
-	if target < 5 {
-		target = 5
-	}
-	if target > 100 {
-		target = 100
-	}
+	target := probesFor(numCentroids, topK, he.Probes)
 	if filtered {
 		target *= 2 // post-filtering discards some candidates; probe wider
 	}

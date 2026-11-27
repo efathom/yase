@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"reflect"
 	"strings"
 	"time"
 
@@ -135,6 +136,7 @@ type IndexConfig struct {
 	DefaultTTL         time.Duration `mapstructure:"default_ttl"`         // 0 = documents never expire by default
 	TTLSweepInterval   time.Duration `mapstructure:"ttl_sweep_interval"`
 	FlatSearchMax      int           `mapstructure:"flat_search_max"` // filters matching <= this many docs are searched exactly
+	ANNProbes          int           `mapstructure:"ann_probes"`      // centroids probed per query (0 = scale with corpus)
 }
 
 type CrawlerConfig struct {
@@ -226,6 +228,11 @@ type JWTAuthConfig struct {
 	// multi-tenancy: an empty tenant yields a context the tenant filter
 	// cannot narrow.
 	RequireTenant bool `mapstructure:"require_tenant"`
+
+	// PublicKeyPath (PEM, RSA ≥2048 or P-256) enables RS256/ES256 tokens.
+	PublicKeyPath string `mapstructure:"public_key_path"`
+	// JWKSURL fetches RS256/ES256 verification keys from an identity provider.
+	JWKSURL string `mapstructure:"jwks_url"`
 }
 
 type TLSConfig struct {
@@ -237,7 +244,10 @@ type TLSConfig struct {
 }
 
 type RateLimitConfig struct {
-	Enabled          bool    `mapstructure:"enabled"`
+	Enabled bool `mapstructure:"enabled"`
+	// Backend is "memory" (per process) or "redis" (shared by all gateway
+	// replicas, using the redis section).
+	Backend          string  `mapstructure:"backend"`
 	DefaultSearchQPS float64 `mapstructure:"default_search_qps"`
 	DefaultIngestRPS float64 `mapstructure:"default_ingest_rps"`
 }
@@ -342,6 +352,7 @@ func Load(configPath string) (*Config, error) {
 	v.SetDefault("auth.method", "api_key")
 	v.SetDefault("tls.enabled", false)
 	v.SetDefault("rate_limit.enabled", false)
+	v.SetDefault("rate_limit.backend", "memory")
 	v.SetDefault("rate_limit.default_search_qps", 100)
 	v.SetDefault("rate_limit.default_ingest_rps", 50)
 
@@ -420,6 +431,9 @@ func Load(configPath string) (*Config, error) {
 	v.SetEnvPrefix("YASE")
 	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
 	v.AutomaticEnv()
+	// AutomaticEnv only consults keys viper already knows (defaults or the
+	// config file); bind every field so any setting can come from the env.
+	bindEnvs(v, reflect.TypeOf(Config{}), "")
 
 	var cfg Config
 	if err := v.Unmarshal(&cfg); err != nil {
@@ -427,4 +441,28 @@ func Load(configPath string) (*Config, error) {
 	}
 
 	return &cfg, nil
+}
+
+// bindEnvs registers every mapstructure key of t (recursively) with viper.
+func bindEnvs(v *viper.Viper, t reflect.Type, prefix string) {
+	for i := 0; i < t.NumField(); i++ {
+		f := t.Field(i)
+		tag := f.Tag.Get("mapstructure")
+		if tag == "" || tag == "-" {
+			continue
+		}
+		key := tag
+		if prefix != "" {
+			key = prefix + "." + tag
+		}
+		ft := f.Type
+		if ft.Kind() == reflect.Struct && ft != reflect.TypeOf(time.Duration(0)) {
+			bindEnvs(v, ft, key)
+			continue
+		}
+		if ft.Kind() == reflect.Slice && ft.Elem().Kind() == reflect.Struct {
+			continue // lists of objects (e.g. api_keys) come from the config file
+		}
+		_ = v.BindEnv(key)
+	}
 }

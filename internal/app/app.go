@@ -17,6 +17,7 @@ import (
 	"github.com/efathom/yase/pkg/collection"
 	"github.com/efathom/yase/pkg/config"
 	"github.com/efathom/yase/pkg/index"
+	"github.com/redis/go-redis/v9"
 )
 
 // NewHTTPServer returns a server with read/write/idle timeouts so slow or
@@ -118,4 +119,26 @@ func ServeHealth(port int, ready func(context.Context) error) *http.Server {
 		}
 	}()
 	return srv
+}
+
+// RateLimiter builds the configured rate limiter, or nil when disabled.
+func RateLimiter(cfg *config.Config) *auth.RateLimiter {
+	if !cfg.RateLimit.Enabled {
+		return nil
+	}
+	rl := auth.NewRateLimiter(auth.RateLimitConfig{
+		Enabled:          true,
+		DefaultSearchQPS: cfg.RateLimit.DefaultSearchQPS,
+		DefaultIngestRPS: cfg.RateLimit.DefaultIngestRPS,
+	})
+	if cfg.RateLimit.Backend == "redis" {
+		rl.WithRedis(redis.NewClient(&redis.Options{
+			Addr:        cfg.Redis.Addr,
+			Password:    cfg.Redis.Password,
+			DB:          cfg.Redis.DB,
+			DialTimeout: 500 * time.Millisecond,
+			ReadTimeout: 200 * time.Millisecond,
+		}))
+	}
+	return rl
 }

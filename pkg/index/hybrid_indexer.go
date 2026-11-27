@@ -77,6 +77,7 @@ type HybridEngine struct {
 	EfSearch           int               // HNSW search width (ef)
 	Reranker           reranker.Reranker // nil = disabled
 	RerankerCandidates int               // how many RRF candidates to feed to reranker
+	Probes             int               // centroids probed per query (0 = scale with corpus)
 
 	ifMu          sync.RWMutex
 	invertedFiles map[uint32][]uint32 // centroid ID → leaf doc IDs

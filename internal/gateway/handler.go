@@ -156,6 +156,9 @@ func (h *Handler) auditDelete(r *http.Request, count int) {
 func parseTrustedProxies(cidrs []string) ([]netip.Prefix, error) {
 	out := make([]netip.Prefix, 0, len(cidrs))
 	for _, c := range cidrs {
+		if c = strings.TrimSpace(c); c == "" {
+			continue
+		}
 		if p, err := netip.ParsePrefix(c); err == nil {
 			out = append(out, p.Masked())
 			continue

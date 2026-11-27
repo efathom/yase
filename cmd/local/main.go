@@ -157,12 +157,8 @@ func main() {
 	// Registered after SetAuthEnabled so the routes carry their scope checks.
 	collectionHandler.RegisterRoutes(mux)
 
-	if cfg.RateLimit.Enabled {
-		opts.RateLimiter = auth.NewRateLimiter(auth.RateLimitConfig{
-			Enabled:          cfg.RateLimit.Enabled,
-			DefaultSearchQPS: cfg.RateLimit.DefaultSearchQPS,
-			DefaultIngestRPS: cfg.RateLimit.DefaultIngestRPS,
-		})
+	if rl := app.RateLimiter(cfg); rl != nil {
+		opts.RateLimiter = rl
 	}
 
 	root := gateway.Chain(mux, opts)

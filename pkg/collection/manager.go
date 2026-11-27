@@ -448,6 +448,9 @@ func (m *Manager) openCollection(c *Collection) error {
 	}
 	eng.Reranker = m.reranker
 	eng.RerankerCandidates = m.rerankerCandidates
+	if m.globalCfg != nil {
+		eng.Probes = m.globalCfg.Index.ANNProbes
+	}
 
 	m.cols[c.ID] = c
 	m.engines[c.ID] = eng
@@ -611,6 +614,9 @@ func (m *Manager) validateEmbedderRef(ref *EmbedderRef) error {
 		allowed = m.globalCfg.Collections.AllowedEmbedderHosts
 	}
 	for _, h := range allowed {
+		if h = strings.TrimSpace(h); h == "" {
+			continue
+		}
 		if strings.EqualFold(h, u.Host) || strings.EqualFold(h, u.Hostname()) {
 			return nil
 		}

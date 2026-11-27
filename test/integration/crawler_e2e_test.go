@@ -127,6 +127,9 @@ func TestCrawlerDomainFilterE2E(t *testing.T) {
 
 	worker := coordinator.NewWorkerNode("e2e-worker", masterServer.URL, rl, jobs, results)
 	worker.RateLimit = 10 // 10 requests per second — fast for tests
+	// The site under test is an httptest server on loopback, which the SSRF
+	// guard rightly refuses by default.
+	worker.DNSCache.AllowPrivateAddresses = true
 	worker.RateWindow = time.Second
 	worker.Start(ctx, 4)
 

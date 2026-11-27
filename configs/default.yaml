@@ -29,7 +29,7 @@ hnsw:
 
 index:
   path: /data/yase/bluge
-  arena_size_bytes: 4294967296  # 4GB
+  arena_size_bytes: 68719476736 # upper bound; grows on demand in 64 MiB segments
   centroid_rate: 5              # 20% of docs become centroids
   grpc_port: 50052              # IndexService gRPC port
 
@@ -85,7 +85,7 @@ embedder:
 
 collections:
   base_path: /data/yase/collections
-  default_arena: 1073741824    # 1GB per collection
+  default_arena: 68719476736   # per-collection upper bound; grows on demand
   max_collections: 100
   default_collection: _default
 
@@ -149,6 +149,9 @@ cluster:
   bootstrap: false
   join_addr: ""        # leader HTTP address to join (e.g. http://localhost:9100)
   shard_port: 50053    # gRPC port for ShardSearchService
+  http_addr: 127.0.0.1:7080 # management API; a routable address requires join_token
+  join_token: ""       # shared secret (>= 16 chars) for the management API
+  num_shards: 3        # documents are placed by hash(url) % num_shards
 
 audit:
   enabled: false

@@ -14,6 +14,9 @@ services:
       dockerfile: deploy/Dockerfile.cluster-node
     environment:
       YASE_CLUSTER_NODE_ID: node-0
+      YASE_CLUSTER_HTTP_ADDR: "0.0.0.0:9100"
+      YASE_CLUSTER_JOIN_TOKEN: ${YASE_CLUSTER_JOIN_TOKEN:-dev-only-cluster-token-change-me}
+      YASE_CLUSTER_NUM_SHARDS: 3
       YASE_CLUSTER_RAFT_ADDR: node-0:7000
       YASE_CLUSTER_RAFT_DIR: /data/raft
       YASE_CLUSTER_SHARD_PORT: 50053
@@ -22,7 +25,7 @@ services:
       YASE_EMBEDDER_PROVIDER: mock
       YASE_EMBEDDER_DIMENSION: 32
       YASE_METRICS_ADDR: ":9090"
-    command: ["--bootstrap", "--cluster-http-port", "9100"]
+    command: ["--bootstrap", "--cluster-http-port", "9100", "--shard-id", "0"]
     ports:
       - "7000:7000"
       - "50053:50053"
@@ -36,6 +39,9 @@ services:
       dockerfile: deploy/Dockerfile.cluster-node
     environment:
       YASE_CLUSTER_NODE_ID: node-1
+      YASE_CLUSTER_HTTP_ADDR: "0.0.0.0:9101"
+      YASE_CLUSTER_JOIN_TOKEN: ${YASE_CLUSTER_JOIN_TOKEN:-dev-only-cluster-token-change-me}
+      YASE_CLUSTER_NUM_SHARDS: 3
       YASE_CLUSTER_RAFT_ADDR: node-1:7001
       YASE_CLUSTER_RAFT_DIR: /data/raft
       YASE_CLUSTER_SHARD_PORT: 50054
@@ -44,7 +50,7 @@ services:
       YASE_EMBEDDER_PROVIDER: mock
       YASE_EMBEDDER_DIMENSION: 32
       YASE_METRICS_ADDR: ":9091"
-    command: ["--join", "http://node-0:9100", "--cluster-http-port", "9101"]
+    command: ["--join", "http://node-0:9100", "--cluster-http-port", "9101", "--shard-id", "1"]
     ports:
       - "7001:7001"
       - "50054:50054"
@@ -60,6 +66,9 @@ services:
       dockerfile: deploy/Dockerfile.cluster-node
     environment:
       YASE_CLUSTER_NODE_ID: node-2
+      YASE_CLUSTER_HTTP_ADDR: "0.0.0.0:9102"
+      YASE_CLUSTER_JOIN_TOKEN: ${YASE_CLUSTER_JOIN_TOKEN:-dev-only-cluster-token-change-me}
+      YASE_CLUSTER_NUM_SHARDS: 3
       YASE_CLUSTER_RAFT_ADDR: node-2:7002
       YASE_CLUSTER_RAFT_DIR: /data/raft
       YASE_CLUSTER_SHARD_PORT: 50055
@@ -68,7 +77,7 @@ services:
       YASE_EMBEDDER_PROVIDER: mock
       YASE_EMBEDDER_DIMENSION: 32
       YASE_METRICS_ADDR: ":9092"
-    command: ["--join", "http://node-0:9100", "--cluster-http-port", "9102"]
+    command: ["--join", "http://node-0:9100", "--cluster-http-port", "9102", "--shard-id", "2"]
     ports:
       - "7002:7002"
       - "50055:50055"
@@ -84,6 +93,7 @@ services:
       dockerfile: deploy/Dockerfile.dist-gateway
     environment:
       YASE_SERVER_HTTP_PORT: 8000
+      YASE_CLUSTER_JOIN_TOKEN: ${YASE_CLUSTER_JOIN_TOKEN:-dev-only-cluster-token-change-me}
       YASE_EMBEDDER_PROVIDER: mock
       YASE_EMBEDDER_DIMENSION: 32
       YASE_METRICS_ADDR: ":9093"

@@ -12,6 +12,7 @@ import (
 	"github.com/efathom/yase/pkg/collection"
 	"github.com/efathom/yase/pkg/embedder"
 	"github.com/efathom/yase/pkg/index"
+	"github.com/efathom/yase/pkg/metrics"
 	"github.com/efathom/yase/pkg/pipeline"
 	ingestionv1 "github.com/efathom/yase/proto/v1"
 	"github.com/segmentio/kafka-go"
@@ -192,6 +193,7 @@ func (p *PipelineHandler) Handle(ctx context.Context, msg kafka.Message) error {
 		}
 		return fmt.Errorf("index %d chunks for %s: %w", len(docs), record.Url, err)
 	}
+	metrics.RecordsIndexed.WithLabelValues(collectionID).Inc()
 	slog.Debug("pipeline: indexed record", "url", record.Url, "collection", collectionID, "chunks", len(docs))
 	return nil
 }

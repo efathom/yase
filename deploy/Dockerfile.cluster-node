@@ -8,6 +8,9 @@ RUN CGO_ENABLED=0 go build -o /cluster-node ./cmd/cluster-node
 
 FROM alpine:3.21
 COPY --from=builder /cluster-node /usr/local/bin/cluster-node
-RUN mkdir -p /data/raft /data/index
+RUN apk add --no-cache ca-certificates \
+    && addgroup -S -g 10001 yase && adduser -S -D -H -u 10001 -G yase yase \
+    && mkdir -p /data/raft /data/index && chown -R 10001:10001 /data
 EXPOSE 7000 50053 9100
+USER 10001:10001
 ENTRYPOINT ["cluster-node"]

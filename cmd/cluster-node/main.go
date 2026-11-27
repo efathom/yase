@@ -152,6 +152,7 @@ func main() {
 		engine.Reranker = ranker
 		engine.RerankerCandidates = cfg.Reranker.Candidates
 	}
+	engine.Probes = cfg.Index.ANNProbes
 	maint := app.Maintenance(cfg.Index)
 	go engineMaintenance(ctx, engine, maint.CheckpointInterval, maint.CompactDeadRatio)
 	engine.StartTTLSweeper(ctx, maint.TTL)

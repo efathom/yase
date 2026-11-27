@@ -133,12 +133,8 @@ func main() {
 		}
 		opts.Authenticator = authn
 	}
-	if cfg.RateLimit.Enabled {
-		opts.RateLimiter = auth.NewRateLimiter(auth.RateLimitConfig{
-			Enabled:          true,
-			DefaultSearchQPS: cfg.RateLimit.DefaultSearchQPS,
-			DefaultIngestRPS: cfg.RateLimit.DefaultIngestRPS,
-		})
+	if rl := app.RateLimiter(cfg); rl != nil {
+		opts.RateLimiter = rl
 	}
 
 	addr := fmt.Sprintf(":%d", cfg.Server.HTTPPort)

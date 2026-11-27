@@ -1,6 +1,6 @@
 #!/bin/bash
 # 3-node distributed cluster E2E: crawl → ingest → Kafka (6 partitions) →
-# 3 cluster nodes (shared consumer group, auto-assigned partitions) →
+# 3 cluster nodes (each its own consumer group; keeps hash(url) % 3 == shard) →
 # dist-gateway (scatter-gather across 3 shards) → search
 # + collection CRUD, multi-collection search, Raft collection commands
 #
@@ -300,15 +300,21 @@ echo ""
 
 TOTAL_INDEXED=0
 for i in 0 1 2; do
-  COUNT=$(grep -c "processed and committed" "$LOG_DIR/node-$i.log" 2>/dev/null | tr -dc '0-9' || true); COUNT=${COUNT:-0}
+  # Records indexed on this node's shard (placement is hash(url) % 3).
+  COUNT=$(curl -s "http://localhost:920$i/metrics" | awk '/^yase_index_records_indexed_total/ {s+=$2} END {printf "%d", s}'); COUNT=${COUNT:-0}
   TOTAL_INDEXED=$((TOTAL_INDEXED + COUNT))
   if [ "$COUNT" -gt 0 ] 2>/dev/null; then
     pass "Node-$i: $COUNT docs indexed"
   else
-    fail "Node-$i: 0 docs (no partitions assigned?)"
+    echo "  NOTE: Node-$i: 0 records on its shard (possible with few pages)"
   fi
 done
 echo "  Total: $TOTAL_INDEXED docs across 3 nodes"
+if [ "$TOTAL_INDEXED" -gt 0 ]; then
+  pass "Documents indexed across shards ($TOTAL_INDEXED)"
+else
+  fail "No documents indexed on any shard"
+fi
 echo ""
 
 # ══════════════════════════════════════════

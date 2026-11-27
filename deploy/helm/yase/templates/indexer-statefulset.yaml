@@ -1,3 +1,6 @@
+{{- if gt (int .Values.replicaCount.indexer) 1 }}
+{{- fail "replicaCount.indexer must be 1: the indexer is the single writer of its collections. Use cluster-node for scale-out and replication." }}
+{{- end }}
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
@@ -22,6 +25,9 @@ spec:
         prometheus.io/port: "{{ .Values.metrics.port }}"
     spec:
       serviceAccountName: {{ include "yase.serviceAccountName" . }}
+      terminationGracePeriodSeconds: {{ .Values.indexer.terminationGracePeriodSeconds }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
       containers:
         - name: indexer
           image: "{{ .Values.image.repository }}/indexer:{{ .Values.image.tag }}"
@@ -31,7 +37,16 @@ spec:
               name: grpc
             - containerPort: {{ .Values.metrics.port }}
               name: metrics
+            - containerPort: {{ .Values.indexer.healthPort }}
+              name: health
           env:
+            - name: YASE_SERVER_HEALTH_PORT
+              value: "{{ .Values.indexer.healthPort }}"
+            - name: YASE_KAFKA_DLQ_TOPIC
+              value: "{{ .Values.kafka.dlqTopic }}"
+            - name: YASE_COLLECTIONS_ALLOWED_EMBEDDER_HOSTS
+              value: "{{ join "," .Values.collections.allowedEmbedderHosts }}"
+            {{- include "yase.authEnv" . | nindent 12 }}
             - name: YASE_KAFKA_BROKERS
               value: "{{ join "," .Values.kafka.brokers }}"
             - name: YASE_KAFKA_TOPIC
@@ -61,9 +76,30 @@ spec:
               mountPath: /data/yase
           resources:
             {{- toYaml .Values.indexer.resources | nindent 12 }}
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: health
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: health
+            periodSeconds: 10
+          startupProbe:
+            # Startup reconciles engines (and may re-embed after a crash).
+            httpGet:
+              path: /health
+              port: health
+            periodSeconds: 10
+            failureThreshold: 180
           securityContext:
-            capabilities:
-              add: ["IPC_LOCK"]
+            {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+      {{- if not .Values.indexer.persistence.enabled }}
+      volumes:
+        - name: data
+          emptyDir: {}
+      {{- end }}
   {{- if .Values.indexer.persistence.enabled }}
   volumeClaimTemplates:
     - metadata:

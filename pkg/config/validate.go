@@ -164,8 +164,8 @@ func (c *Config) Validate() error {
 				errs = append(errs, fmt.Errorf("auth.api_keys: at least one API key required when method=api_key"))
 			}
 		case "jwt":
-			if c.Auth.JWT.Secret == "" {
-				errs = append(errs, fmt.Errorf("auth.jwt.secret: required when method=jwt"))
+			if c.Auth.JWT.Secret == "" && c.Auth.JWT.PublicKeyPath == "" && c.Auth.JWT.JWKSURL == "" {
+				errs = append(errs, fmt.Errorf("auth.jwt: one of secret, public_key_path or jwks_url is required when method=jwt"))
 			}
 		case "none", "":
 			// ok
@@ -195,6 +195,10 @@ func (c *Config) Validate() error {
 	// Cluster
 	validatePort("cluster.shard_port", c.Cluster.ShardPort, &errs)
 	validateClusterAPI(c, &errs)
+
+	if b := c.RateLimit.Backend; b != "" && b != "memory" && b != "redis" {
+		errs = append(errs, fmt.Errorf("rate_limit.backend: must be memory or redis, got %q", b))
+	}
 
 	// Index maintenance
 	if c.Index.CompactDeadRatio < 0 || c.Index.CompactDeadRatio > 1 {

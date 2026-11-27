@@ -37,7 +37,8 @@
 - Keep `main.go` slim — all logic in packages.
 - Follow the factory pattern for pluggable providers (embedder, reranker, connector, auth).
 - New connectors self-register via `init()` in `connector.DefaultRegistry`.
-- Search pipeline has 5 stages: BM25 → HNSW → Rescore → RRF → Rerank.
+- Search pipeline has 5 stages: BM25 → HNSW → Rescore → RRF → Rerank. BM25 hits are always injected as candidates; probe width scales with corpus size (`TestVectorRecall` gates recall@10 ≥ 0.93).
+- Cluster mode places documents by `hash(url) % cluster.num_shards`; nodes sharing a shard id are replicas.
 - The connector bridge converts Records → CrawlRecords → Kafka, reusing the existing indexing pipeline.
 - **Collections**: Each collection owns its own HybridEngine (physical isolation). The `_default` collection is auto-created at startup. The `collection.Manager` handles CRUD, engine lifecycle, and connector binding. Three search tiers: `/search` → `_default`, `/v1/collections/{id}/search` → single, `/v1/collections/search` → cross-collection fan-out with RRF merge.
 
@@ -49,7 +50,10 @@
 - **HTTP connector base**: `pkg/connector/http_connector.go` — reusable for all REST API connectors
 - **Auth middleware**: `pkg/auth/middleware.go` — HTTP + gRPC interceptors
 - **Arena interface**: `pkg/memory/arena.go` — both `OffHeapArena` (anonymous mmap) and `FileArena` (persistent mmap) implement it
-- **Persistence**: `pkg/hnsw/persist.go` + `pkg/index/persist.go` — binary snapshot/restore for graph + inverted files + vector offsets
+- **Persistence**: `pkg/index/persist.go` — `OpenHybridEngine` (durable engine dir: `bluge/`, `CURRENT`, `gen-N/{arena.bin,snapshot.bin}`), `Checkpoint`, and `Reconcile` (rebuilds missing vectors from Bluge text on startup). Kafka offsets are committed only after a checkpoint (`glue.DaemonOptions.Checkpoint`).
+- **Document IDs**: engine-assigned via `HybridEngine.NextID()`; unique per collection/shard, never hashed. Identify results by `(collection_id | shard_id, id)`.
+- **Process wiring**: `internal/app` — HTTP server timeouts/TLS, indexing daemon, maintenance, health endpoints, rate limiter. Use it from `cmd/*` instead of hand-rolling.
+- **Remote backends**: `internal/gateway/backend.go` — `CollectionAPI` / `CollectionSearchBackend` with local (Manager) and gRPC implementations for the split gateway↔indexer deployment.
 
 ## Security
 - Validate SQL/SOQL identifiers before query construction (`pkg/connector/validate.go`).

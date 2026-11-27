@@ -109,6 +109,16 @@ var (
 		[]string{"result"},
 	)
 
+	RecordsIndexed = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: "yase",
+			Subsystem: "index",
+			Name:      "records_indexed_total",
+			Help:      "Source records (URLs) indexed, by collection.",
+		},
+		[]string{"collection"},
+	)
+
 	KafkaConsumerLag = promauto.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: "yase",

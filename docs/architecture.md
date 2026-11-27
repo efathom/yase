@@ -16,9 +16,9 @@
 
 ```
 Query → Embed (TEI) →
-  Stage 1: BM25 Pre-Filter (Bluge Roaring Bitmaps)
-  Stage 2: HNSW Centroid Traversal (approximate nearest neighbors)
-  Stage 3: Exact Cosine Rescoring (float32 vectors from arena)
+  Stage 1: Pre-Filter (Bluge Roaring Bitmaps) + BM25 lexical candidates
+  Stage 2: HNSW Centroid Traversal (approximate nearest neighbors) ∪ BM25 hits
+  Stage 3: Exact Cosine Rescoring (normalized float32 vectors from arena)
   Stage 4: Reciprocal Rank Fusion (merge BM25 + semantic ranks)
   Stage 5: Cross-Encoder Reranking (optional TEI reranker)
 → Results
@@ -31,7 +31,15 @@ YASE co-locates two indexes behind a single document ID:
 - **Bluge** — an inverted index (Vellum FSTs + Roaring Bitmaps) for BM25 scoring and exact-match metadata filtering.
 - **HNSW-IF** — a custom HNSW vector graph where a subset of documents (centroids, every `centroid_rate`-th by default) live in RAM and the rest are stored in per-centroid inverted-file posting lists. Vectors reside in an off-heap mmap arena, invisible to the Go GC.
 
-Metadata filters are applied **before** any vector math — the "allowed set" is computed by Bluge first, then only documents that pass the filters are rescored. This guarantees correct multi-tenant results even when the nearest vectors belong to a different tenant.
+Metadata filters never let a document of the wrong tenant through, and never starve the vector stage:
+
+- **Restrictive filters** (matching ≤ `index.flat_search_max` documents) resolve to an exact allowed set and every allowed document is scored — the vector stage cannot miss eligible documents just because the nearest clusters belong to other tenants.
+- **Broad filters** use ANN with wider probing and an O(candidates) post-check against the filter.
+- **No filter**: no corpus scan at all.
+
+The top BM25 matches are always added to the candidate pool, so strong keyword matches are returned even when they are far from the query vector. The number of probed centroids scales with the corpus (recall@10 ≥ 0.95 measured from 5k to 100k documents; `TestVectorRecall` guards it in CI).
+
+Document IDs are assigned by each engine and are unique within a collection or shard; results from cross-collection and distributed search are identified by `(collection_id | shard_id, id)`.
 
 ## Project Structure
 
