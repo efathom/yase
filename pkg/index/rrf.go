@@ -63,3 +63,53 @@ func ReciprocalRankFusion(candidates []ScoredResult, topK int) []ScoredResult {
 	}
 	return candidates
 }
+
+// PooledRank is one entry of FusePooled's output.
+type PooledRank struct {
+	Index int     // position in the input slice
+	Score float64 // fused score
+}
+
+// FusePooled re-ranks results gathered from several disjoint sources (shards
+// or collections searched with the same embedder) as if they came from one
+// index: documents are ranked globally by BM25 (only those that matched the
+// text) and by semantic similarity, and the ranks are fused with RRF.
+//
+// Unlike re-fusing each source's own rank positions — which interleaves the
+// sources so every source's #1 ties regardless of quality — this compares the
+// underlying scores directly. Entries are identified by position, so equal
+// IDs from different sources never collide. It returns at most topK entries
+// (all if topK <= 0), best first.
+func FusePooled(results []ScoredResult, topK int) []PooledRank {
+	const kRRF = 60.0
+	n := len(results)
+	if n == 0 {
+		return nil
+	}
+	idx := make([]int, n)
+	for i := range idx {
+		idx[i] = i
+	}
+	scores := make([]float64, n)
+
+	sort.SliceStable(idx, func(a, b int) bool { return results[idx[a]].BM25Score > results[idx[b]].BM25Score })
+	for rank, i := range idx {
+		if results[i].BM25Score <= 0 {
+			break
+		}
+		scores[i] += 1.0 / (kRRF + float64(rank+1))
+	}
+	sort.SliceStable(idx, func(a, b int) bool { return results[idx[a]].SemanticScore > results[idx[b]].SemanticScore })
+	for rank, i := range idx {
+		scores[i] += 1.0 / (kRRF + float64(rank+1))
+	}
+	sort.SliceStable(idx, func(a, b int) bool { return scores[idx[a]] > scores[idx[b]] })
+	if topK > 0 && len(idx) > topK {
+		idx = idx[:topK]
+	}
+	out := make([]PooledRank, len(idx))
+	for i, j := range idx {
+		out[i] = PooledRank{Index: j, Score: scores[j]}
+	}
+	return out
+}

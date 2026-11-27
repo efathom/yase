@@ -221,6 +221,11 @@ type CollectionManagerConfig struct {
 	DefaultArena      uint64 `mapstructure:"default_arena"`
 	MaxCollections    int    `mapstructure:"max_collections"`
 	DefaultCollection string `mapstructure:"default_collection"`
+
+	// AllowedEmbedderHosts lists the hosts (host or host:port) a collection
+	// may point its own embedder base_url at. Empty means per-collection
+	// embedder URLs are rejected, preventing SSRF via collection configs.
+	AllowedEmbedderHosts []string `mapstructure:"allowed_embedder_hosts"`
 }
 
 type ConnectorManagerConfig struct {

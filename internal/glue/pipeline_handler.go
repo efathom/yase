@@ -2,10 +2,12 @@ package glue
 
 import (
 	"context"
+	"errors"
 	"fmt"
-	"hash/fnv"
 	"log/slog"
+	"strconv"
 
+	"github.com/efathom/yase/pkg/auth"
 	"github.com/efathom/yase/pkg/chunking"
 	"github.com/efathom/yase/pkg/collection"
 	"github.com/efathom/yase/pkg/embedder"
@@ -83,11 +85,19 @@ func (p *PipelineHandler) resolveEmbedder(collectionID string) (embedder.Embedde
 }
 
 // Handle processes a single Kafka message through the indexing pipeline.
+//
+// The message is fully processed — chunked, hooked, embedded — before the
+// index is touched, and then all previous chunks of the URL are replaced in a
+// single atomic batch. Any failure returns an error so the message is retried
+// (and eventually dead-lettered) instead of being committed half-indexed.
 func (p *PipelineHandler) Handle(ctx context.Context, msg kafka.Message) error {
 	// 1. Deserialize CrawlRecord from protobuf
 	var record ingestionv1.CrawlRecord
 	if err := proto.Unmarshal(msg.Value, &record); err != nil {
-		return fmt.Errorf("unmarshal crawl record: %w", err)
+		return Permanent(fmt.Errorf("unmarshal crawl record: %w", err))
+	}
+	if record.Url == "" {
+		return Permanent(fmt.Errorf("crawl record has no url"))
 	}
 
 	markdown := string(record.RawContent)
@@ -103,79 +113,77 @@ func (p *PipelineHandler) Handle(ctx context.Context, msg kafka.Message) error {
 
 	emb, err := p.resolveEmbedder(collectionID)
 	if err != nil {
-		return fmt.Errorf("resolve embedder for collection %q: %w", collectionID, err)
+		return Permanent(fmt.Errorf("resolve embedder for collection %q: %w", collectionID, err))
 	}
-
 	eng, err := p.resolveEngine(collectionID)
 	if err != nil {
-		return fmt.Errorf("resolve engine for collection %q: %w", collectionID, err)
+		return Permanent(fmt.Errorf("resolve engine for collection %q: %w", collectionID, err))
 	}
 
-	// 2b. Delete-before-write: remove any previously indexed chunks for this
-	// URL so that re-ingestion with fewer chunks does not leave stale results.
-	if _, err := eng.DeleteByFilter(ctx, map[string]string{"url": record.Url}); err != nil {
-		slog.Warn("pipeline: delete-before-write failed (continuing)", "url", record.Url, "error", err)
-	}
-
-	// 3. Semantic chunking using valley detection
-	embedFn := func(text string) ([]float32, error) {
-		return emb.Embed(ctx, text)
-	}
-
-	chunks, err := chunking.SemanticChunker(markdown, embedFn, p.Threshold)
+	// 3. Semantic chunking — sentences are embedded in one batch call.
+	opts := chunking.DefaultOptions()
+	opts.Threshold = p.Threshold
+	chunks, err := chunking.SemanticChunkerWithOptions(markdown, func(texts []string) ([][]float32, error) {
+		return emb.EmbedBatch(ctx, texts)
+	}, opts)
 	if err != nil {
 		return fmt.Errorf("semantic chunker: %w", err)
 	}
+	if len(chunks) == 0 {
+		return nil
+	}
 
-	// 4. Process each chunk through the pipeline
-	for i, chunkText := range chunks {
-		// WASM pre-embed hook (NER, PII redaction, etc.)
-		if p.WasmEngine != nil {
-			processed, err := p.WasmEngine.ExecuteHooks(ctx, pipeline.PreEmbed, chunkText)
+	// 4. WASM pre-embed hooks (NER, PII redaction, ...). Fail closed: indexing
+	// text a redaction hook could not process would leak what it guards.
+	if p.WasmEngine != nil {
+		for i, c := range chunks {
+			processed, err := p.WasmEngine.ExecuteHooks(ctx, pipeline.PreEmbed, c)
 			if err != nil {
-				slog.Warn("pipeline: WASM PreEmbed hook error", "error", err)
-			} else {
-				chunkText = processed
+				return fmt.Errorf("WASM PreEmbed hook on chunk %d: %w", i, err)
 			}
+			chunks[i] = processed
 		}
+	}
 
-		// Embed the chunk
-		vec, err := emb.Embed(ctx, chunkText)
+	// 5. Embed all chunks in one batch.
+	vecs, err := emb.EmbedBatch(ctx, chunks)
+	if err != nil {
+		return fmt.Errorf("embed %d chunks: %w", len(chunks), err)
+	}
+	if len(vecs) != len(chunks) {
+		return fmt.Errorf("embedder returned %d vectors for %d chunks", len(vecs), len(chunks))
+	}
+
+	// 6. Build documents with engine-assigned IDs (unique within the
+	// collection, never reused — no hash collisions).
+	docs := make([]index.Document, len(chunks))
+	for i, chunkText := range chunks {
+		id, err := eng.NextID()
 		if err != nil {
-			slog.Error("pipeline: embed error", "chunk", i, "url", record.Url, "error", err)
-			continue
+			return err
 		}
-
-		// Deterministic chunk ID: FNV-1a hash of "url#chunk_idx"
-		chunkID := hashChunkID(record.Url, i)
-
-		// Build metadata
-		metadata := make(map[string]string)
+		metadata := make(map[string]string, len(record.Metadata)+2)
 		for k, v := range record.Metadata {
 			metadata[k] = v
 		}
 		metadata["url"] = record.Url
-		metadata["chunk_idx"] = fmt.Sprintf("%d", i)
-
-		// Ingest into hybrid engine (Bluge + HNSW-IF)
-		doc := index.Document{
-			ID:       chunkID,
-			Text:     chunkText,
-			Vector:   vec,
-			Metadata: metadata,
-		}
-		if err := eng.Ingest(ctx, doc); err != nil {
-			slog.Error("pipeline: ingest error", "chunk", i, "url", record.Url, "error", err)
-			continue
-		}
+		metadata["chunk_idx"] = strconv.Itoa(i)
+		docs[i] = index.Document{ID: id, Text: chunkText, Vector: vecs[i], Metadata: metadata}
 	}
 
+	// 7. Atomically replace this URL's previous chunks. The replace scope
+	// includes the tenant, so one tenant's record can never remove another
+	// tenant's documents that happen to share a URL.
+	replace := map[string]string{"url": record.Url}
+	if t := record.Metadata[auth.TenantField]; t != "" {
+		replace[auth.TenantField] = t
+	}
+	if err := eng.IngestBatch(ctx, replace, docs); err != nil {
+		if errors.Is(err, index.ErrDimensionMismatch) {
+			return Permanent(err)
+		}
+		return fmt.Errorf("index %d chunks for %s: %w", len(docs), record.Url, err)
+	}
+	slog.Debug("pipeline: indexed record", "url", record.Url, "collection", collectionID, "chunks", len(docs))
 	return nil
-}
-
-// hashChunkID returns a deterministic uint32 chunk ID from url#index.
-func hashChunkID(url string, chunkIdx int) uint32 {
-	h := fnv.New32a()
-	h.Write([]byte(fmt.Sprintf("%s#%d", url, chunkIdx)))
-	return h.Sum32()
 }

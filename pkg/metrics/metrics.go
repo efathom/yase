@@ -79,6 +79,36 @@ var (
 		[]string{"topic", "status"},
 	)
 
+	IndexedMessagesTotal = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: "yase",
+			Subsystem: "kafka",
+			Name:      "messages_processed_total",
+			Help:      "Kafka messages processed by the indexer, by outcome (ok, dead_lettered).",
+		},
+		[]string{"outcome"},
+	)
+
+	EngineCheckpointsTotal = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: "yase",
+			Subsystem: "index",
+			Name:      "checkpoints_total",
+			Help:      "Engine checkpoints by result (ok, error).",
+		},
+		[]string{"result"},
+	)
+
+	EngineCompactionsTotal = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: "yase",
+			Subsystem: "index",
+			Name:      "compactions_total",
+			Help:      "Engine compactions by result (ok, error).",
+		},
+		[]string{"result"},
+	)
+
 	KafkaConsumerLag = promauto.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: "yase",

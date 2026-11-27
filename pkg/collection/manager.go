@@ -5,8 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -14,6 +16,8 @@ import (
 	"github.com/efathom/yase/pkg/config"
 	"github.com/efathom/yase/pkg/embedder"
 	"github.com/efathom/yase/pkg/index"
+	"github.com/efathom/yase/pkg/metrics"
+	"github.com/efathom/yase/pkg/reranker"
 )
 
 var (
@@ -23,6 +27,8 @@ var (
 	ErrAlreadyExists = errors.New("collection already exists")
 	// ErrDefaultDelete indicates an attempt to delete the _default collection.
 	ErrDefaultDelete = errors.New("cannot delete the default collection")
+	// ErrInvalidConfig indicates a rejected collection configuration.
+	ErrInvalidConfig = errors.New("invalid collection config")
 )
 
 // Manager handles the full lifecycle of collections: CRUD, engine provisioning,
@@ -38,6 +44,9 @@ type Manager struct {
 	basePath  string
 	globalCfg *config.Config
 	logger    *slog.Logger
+
+	reranker           reranker.Reranker
+	rerankerCandidates int
 }
 
 // NewManager creates a collection manager. Call RestoreAll() after construction
@@ -76,7 +85,8 @@ func (m *Manager) RestoreAll(ctx context.Context) error {
 			m.logger.Error("failed to restore collection", "id", c.ID, "error", err)
 			continue
 		}
-		m.logger.Info("restored collection", "id", c.ID, "name", c.Name)
+		m.reconcile(ctx, c.ID, m.engines[c.ID], m.embedders[c.ID])
+		m.logger.Info("restored collection", "id", c.ID, "name", c.Name, "documents", m.engines[c.ID].DocCount())
 	}
 
 	// Ensure _default exists
@@ -114,6 +124,9 @@ func ValidateCollectionID(id string) error {
 // Create provisions a new collection with its own HybridEngine.
 func (m *Manager) Create(ctx context.Context, tenantID, id, name string, cfg CollectionConfig) (*Collection, error) {
 	if err := ValidateCollectionID(id); err != nil {
+		return nil, err
+	}
+	if err := m.validateEmbedderRef(cfg.Embedder); err != nil {
 		return nil, err
 	}
 
@@ -238,26 +251,32 @@ func (m *Manager) Delete(ctx context.Context, callerTenant, id string) error {
 	}
 
 	m.mu.Lock()
-	defer m.mu.Unlock()
 
 	c, ok := m.cols[id]
 	if !ok || !accessible(callerTenant, c) {
+		m.mu.Unlock()
 		return fmt.Errorf("%w: %q", ErrNotFound, id)
 	}
 
 	c.Status = StatusDeleting
 	c.UpdatedAt = time.Now().UTC()
-	_ = m.store.Save(ctx, c)
+	if err := m.store.Save(ctx, c); err != nil {
+		m.mu.Unlock()
+		return fmt.Errorf("persist deleting status: %w", err)
+	}
+	eng := m.engines[id]
+	delete(m.engines, id)
+	delete(m.embedders, id)
+	delete(m.cols, id)
+	// Closing waits for in-flight searches and removing data can be slow:
+	// do both without holding the manager lock, which every request takes.
+	m.mu.Unlock()
 
-	if eng, ok := m.engines[id]; ok {
+	if eng != nil {
 		if err := eng.Close(); err != nil {
 			m.logger.Error("error closing engine", "id", id, "error", err)
 		}
-		delete(m.engines, id)
 	}
-	delete(m.embedders, id)
-	delete(m.cols, id)
-
 	if err := os.RemoveAll(filepath.Join(m.basePath, id)); err != nil {
 		m.logger.Error("error removing collection data", "id", id, "error", err)
 	}
@@ -401,34 +420,202 @@ func (m *Manager) Close() error {
 	return firstErr
 }
 
-// openCollection provisions a HybridEngine and embedder for a collection and
-// registers them in the in-memory maps. Must be called with m.mu held or
-// during single-threaded startup.
+// openCollection provisions a durable HybridEngine and embedder for a
+// collection and registers them in the in-memory maps. Must be called with
+// m.mu held or during single-threaded startup.
 func (m *Manager) openCollection(c *Collection) error {
-	indexPath := filepath.Join(m.basePath, c.ID, "bluge")
-	arenaSize := m.resolveArenaSize(c.Config)
 	vecDim := m.resolveVecDim(c.Config)
-	centroidRate := m.resolveCentroidRate(c.Config)
+	emb, err := m.resolveEmbedder(c.Config)
+	if err != nil {
+		return fmt.Errorf("resolve embedder: %w", err)
+	}
+	if d := emb.Dimension(); d > 0 && d != vecDim {
+		return fmt.Errorf("embedder dimension %d does not match collection vec_dim %d", d, vecDim)
+	}
 
 	var hnswCfg config.HNSWConfig
 	if m.globalCfg != nil {
 		hnswCfg = m.globalCfg.HNSW
 	}
-	eng, err := index.NewHybridEngineWithConfig(indexPath, arenaSize, index.HNswConfig(hnswCfg, vecDim), centroidRate)
+	eng, err := index.OpenHybridEngine(index.EngineConfig{
+		Dir:          filepath.Join(m.basePath, c.ID),
+		ArenaSize:    m.resolveArenaSize(c.Config),
+		HNSW:         index.HNswConfig(hnswCfg, vecDim),
+		CentroidRate: m.resolveCentroidRate(c.Config),
+	})
 	if err != nil {
-		return fmt.Errorf("new hybrid engine: %w", err)
+		return fmt.Errorf("open hybrid engine: %w", err)
 	}
-
-	emb, err := m.resolveEmbedder(c.Config)
-	if err != nil {
-		eng.Close()
-		return fmt.Errorf("resolve embedder: %w", err)
-	}
+	eng.Reranker = m.reranker
+	eng.RerankerCandidates = m.rerankerCandidates
 
 	m.cols[c.ID] = c
 	m.engines[c.ID] = eng
 	m.embedders[c.ID] = emb
 	return nil
+}
+
+// reconcile brings a freshly opened engine's vector index in line with its
+// text index, re-embedding documents whose vectors were not checkpointed.
+func (m *Manager) reconcile(ctx context.Context, id string, eng *index.HybridEngine, emb embedder.Embedder) {
+	start := time.Now()
+	st, err := eng.Reconcile(ctx, emb.EmbedBatch, 64)
+	if err != nil {
+		m.logger.Error("collection reconcile failed", "id", id, "error", err)
+		return
+	}
+	if st.ReEmbedded > 0 || st.DroppedVectors > 0 || st.MissingVectors > 0 {
+		m.logger.Warn("collection reconciled", "id", id, "documents", st.Documents,
+			"re_embedded", st.ReEmbedded, "dropped_vectors", st.DroppedVectors,
+			"missing_vectors", st.MissingVectors, "duration", time.Since(start))
+	}
+}
+
+// embedderKey identifies the embedding model a collection uses.
+func embedderKey(c *Collection) string {
+	if e := c.Config.Embedder; e != nil {
+		return e.Provider + "|" + e.Model + "|" + e.BaseURL + "|" + strconv.Itoa(e.Dimension)
+	}
+	return "global"
+}
+
+// SameEmbedder reports whether all the given collections embed with the same
+// model, i.e. whether their semantic scores are directly comparable.
+func (m *Manager) SameEmbedder(ids []string) bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	key := ""
+	for i, id := range ids {
+		c, ok := m.cols[id]
+		if !ok {
+			return false
+		}
+		k := embedderKey(c)
+		if i == 0 {
+			key = k
+		} else if k != key {
+			return false
+		}
+	}
+	return true
+}
+
+// SetReranker attaches a cross-encoder reranker to every collection (current
+// and future). Pass nil to disable.
+func (m *Manager) SetReranker(r reranker.Reranker, candidates int) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.reranker, m.rerankerCandidates = r, candidates
+	for _, eng := range m.engines {
+		eng.Reranker = r
+		eng.RerankerCandidates = candidates
+	}
+}
+
+// Checkpoint durably persists every collection's vector index. The indexing
+// daemon calls it before committing Kafka offsets.
+func (m *Manager) Checkpoint(ctx context.Context) error {
+	var errs []error
+	for id, eng := range m.AllEngines() {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		if err := eng.Checkpoint(); err != nil && !errors.Is(err, index.ErrEngineClosed) {
+			metrics.EngineCheckpointsTotal.WithLabelValues("error").Inc()
+			errs = append(errs, fmt.Errorf("collection %s: %w", id, err))
+			continue
+		}
+		metrics.EngineCheckpointsTotal.WithLabelValues("ok").Inc()
+	}
+	return errors.Join(errs...)
+}
+
+// MaintenanceConfig controls the background maintenance loop.
+type MaintenanceConfig struct {
+	CheckpointInterval time.Duration // periodic checkpoint for writes not driven by Kafka (default 1m)
+	CompactDeadRatio   float64       // compact when dead bytes exceed this share of the arena (default 0.3)
+	TTL                index.TTLConfig
+}
+
+// StartMaintenance runs periodic checkpoints, compaction and TTL expiry for
+// every collection until ctx is cancelled.
+func (m *Manager) StartMaintenance(ctx context.Context, mc MaintenanceConfig) {
+	if mc.CheckpointInterval <= 0 {
+		mc.CheckpointInterval = time.Minute
+	}
+	if mc.CompactDeadRatio <= 0 {
+		mc.CompactDeadRatio = 0.3
+	}
+	if mc.TTL.SweepInterval <= 0 {
+		mc.TTL.SweepInterval = 10 * time.Minute
+	}
+	go func() {
+		ckpt := time.NewTicker(mc.CheckpointInterval)
+		ttl := time.NewTicker(mc.TTL.SweepInterval)
+		defer ckpt.Stop()
+		defer ttl.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ckpt.C:
+				if err := m.Checkpoint(ctx); err != nil {
+					m.logger.Error("periodic checkpoint failed", "error", err)
+				}
+				for id, eng := range m.AllEngines() {
+					ran, err := eng.MaybeCompact(mc.CompactDeadRatio)
+					switch {
+					case err != nil && !errors.Is(err, index.ErrEngineClosed):
+						metrics.EngineCompactionsTotal.WithLabelValues("error").Inc()
+						m.logger.Error("compaction failed", "id", id, "error", err)
+					case ran:
+						metrics.EngineCompactionsTotal.WithLabelValues("ok").Inc()
+						m.logger.Info("compacted collection", "id", id)
+					}
+				}
+			case <-ttl.C:
+				for id, eng := range m.AllEngines() {
+					if n := eng.SweepExpired(ctx, mc.TTL.DefaultTTL); n > 0 {
+						m.logger.Info("ttl expired documents", "id", id, "count", n)
+					}
+				}
+			}
+		}
+	}()
+}
+
+// ChunkOptions returns the chunking options for a collection.
+func (m *Manager) ChunkOptions(id string) (threshold float32, maxChars int) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	c, ok := m.cols[id]
+	if !ok || c.Config.Chunking == nil {
+		return 0, 0
+	}
+	return c.Config.Chunking.Threshold, c.Config.Chunking.MaxTokens * 4
+}
+
+// validateEmbedderRef rejects per-collection embedder endpoints that are not
+// explicitly allowed. Without this, anyone able to create a collection could
+// make the server issue requests to arbitrary (internal) URLs.
+func (m *Manager) validateEmbedderRef(ref *EmbedderRef) error {
+	if ref == nil || ref.BaseURL == "" {
+		return nil
+	}
+	u, err := url.Parse(ref.BaseURL)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+		return fmt.Errorf("%w: invalid embedder base_url %q", ErrInvalidConfig, ref.BaseURL)
+	}
+	var allowed []string
+	if m.globalCfg != nil {
+		allowed = m.globalCfg.Collections.AllowedEmbedderHosts
+	}
+	for _, h := range allowed {
+		if strings.EqualFold(h, u.Host) || strings.EqualFold(h, u.Hostname()) {
+			return nil
+		}
+	}
+	return fmt.Errorf("%w: embedder host %q is not in collections.allowed_embedder_hosts", ErrInvalidConfig, u.Host)
 }
 
 func (m *Manager) resolveArenaSize(cfg CollectionConfig) uint64 {
@@ -443,12 +630,15 @@ func (m *Manager) resolveArenaSize(cfg CollectionConfig) uint64 {
 			return m.globalCfg.Index.ArenaSize
 		}
 	}
-	return 1 << 30 // 1GB default
+	return 64 << 30 // upper bound; arenas grow on demand
 }
 
 func (m *Manager) resolveVecDim(cfg CollectionConfig) int {
 	if cfg.VecDim > 0 {
 		return cfg.VecDim
+	}
+	if cfg.Embedder != nil && cfg.Embedder.Dimension > 0 {
+		return cfg.Embedder.Dimension
 	}
 	if m.globalCfg != nil && m.globalCfg.Embedder.Dimension > 0 {
 		return m.globalCfg.Embedder.Dimension

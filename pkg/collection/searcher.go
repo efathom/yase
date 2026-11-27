@@ -2,7 +2,9 @@ package collection
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"log/slog"
 	"sort"
 	"sync"
 
@@ -26,9 +28,14 @@ type SearchResult struct {
 	CollectionID string `json:"collection_id"`
 }
 
-// Search executes a hybrid search across one or more collections.
-// If collectionIDs is empty, all collections are searched.
-// Results are merged using Reciprocal Rank Fusion.
+// QueryEmbedder returns the query vector to use for a collection, given that
+// collection's embedder. Implementations should memoize per embedder so a
+// cross-collection search embeds the query once per distinct model.
+type QueryEmbedder func(ctx context.Context, collectionID string, emb embedder.Embedder) ([]float32, error)
+
+// Search executes a hybrid search across one or more collections using the
+// same query vector for all of them. Prefer SearchEmbedded when collections
+// may use different embedders.
 func (s *Searcher) Search(
 	ctx context.Context,
 	callerTenant string,
@@ -38,15 +45,44 @@ func (s *Searcher) Search(
 	filters map[string]string,
 	topK int,
 ) ([]SearchResult, error) {
+	return s.SearchEmbedded(ctx, callerTenant, collectionIDs, textQuery,
+		func(context.Context, string, embedder.Embedder) ([]float32, error) { return queryVec, nil },
+		filters, topK)
+}
+
+// SearchEmbedded executes a hybrid search across one or more collections
+// (all the caller may access when collectionIDs is empty). Each collection is
+// queried with a vector from its own embedder, so collections with different
+// models or dimensions can be searched together.
+func (s *Searcher) SearchEmbedded(
+	ctx context.Context,
+	callerTenant string,
+	collectionIDs []string,
+	textQuery string,
+	embed QueryEmbedder,
+	filters map[string]string,
+	topK int,
+) ([]SearchResult, error) {
 	engines := s.resolveEngines(callerTenant, collectionIDs)
 	if len(engines) == 0 {
-		return nil, fmt.Errorf("no collections found")
+		return nil, fmt.Errorf("%w: no accessible collections", ErrNotFound)
 	}
 
-	// Single collection: no fan-out needed
+	searchOne := func(colID string, eng *index.HybridEngine) ([]index.ScoredResult, error) {
+		emb, err := s.Manager.GetEmbedder(colID)
+		if err != nil {
+			return nil, err
+		}
+		vec, err := embed(ctx, colID, emb)
+		if err != nil {
+			return nil, fmt.Errorf("embed query: %w", err)
+		}
+		return eng.HybridSearch(ctx, textQuery, vec, filters, topK)
+	}
+
 	if len(engines) == 1 {
 		for colID, eng := range engines {
-			results, err := eng.HybridSearch(ctx, textQuery, queryVec, filters, topK)
+			results, err := searchOne(colID, eng)
 			if err != nil {
 				return nil, fmt.Errorf("search collection %q: %w", colID, err)
 			}
@@ -54,44 +90,66 @@ func (s *Searcher) Search(
 		}
 	}
 
-	// Multi-collection: fan-out in parallel, merge via RRF
 	type colResult struct {
 		colID   string
 		results []index.ScoredResult
 		err     error
 	}
-
 	var wg sync.WaitGroup
 	ch := make(chan colResult, len(engines))
-
 	for colID, eng := range engines {
 		wg.Add(1)
 		go func(id string, e *index.HybridEngine) {
 			defer wg.Done()
-			results, err := e.HybridSearch(ctx, textQuery, queryVec, filters, topK)
+			results, err := searchOne(id, e)
 			ch <- colResult{colID: id, results: results, err: err}
 		}(colID, eng)
 	}
-
 	wg.Wait()
 	close(ch)
 
-	// Collect all results with collection tags
 	var allResults []SearchResult
+	var errs []error
 	for cr := range ch {
 		if cr.err != nil {
-			// Log but don't fail the entire search for one collection error
+			// One failing collection degrades, rather than fails, the search.
+			slog.Warn("cross-collection search: collection failed", "collection", cr.colID, "error", cr.err)
+			errs = append(errs, fmt.Errorf("%s: %w", cr.colID, cr.err))
 			continue
 		}
 		allResults = append(allResults, tagResults(cr.results, cr.colID)...)
 	}
-
 	if len(allResults) == 0 {
+		if len(errs) > 0 {
+			return nil, fmt.Errorf("all collections failed: %w", errors.Join(errs...))
+		}
 		return nil, nil
 	}
 
-	// Cross-collection RRF: re-fuse all candidates
+	ids := make([]string, 0, len(engines))
+	for id := range engines {
+		ids = append(ids, id)
+	}
+	if s.Manager.SameEmbedder(ids) {
+		return pooledFusion(allResults, topK), nil
+	}
 	return crossCollectionRRF(allResults, topK), nil
+}
+
+// pooledFusion ranks results from collections that share an embedder as one
+// index (their cosine similarities are directly comparable).
+func pooledFusion(results []SearchResult, topK int) []SearchResult {
+	scored := make([]index.ScoredResult, len(results))
+	for i, r := range results {
+		scored[i] = r.ScoredResult
+	}
+	order := index.FusePooled(scored, topK)
+	out := make([]SearchResult, len(order))
+	for i, o := range order {
+		out[i] = results[o.Index]
+		out[i].FusedScore = o.Score
+	}
+	return out
 }
 
 // SearchSingle searches a single collection by ID.
@@ -145,29 +203,40 @@ func tagResults(results []index.ScoredResult, collectionID string) []SearchResul
 	return tagged
 }
 
-// crossCollectionRRF applies Reciprocal Rank Fusion across results from
-// multiple collections. Each collection's results are already RRF-fused
-// internally; this second pass fuses across collections by their FusedScore rank.
+// crossCollectionRRF merges results from collections whose scores are not
+// comparable (different embedders): each result scores 1/(k + its rank within
+// its own collection), with the collection-local fused score breaking ties.
 func crossCollectionRRF(results []SearchResult, topK int) []SearchResult {
 	const k = 60.0
-
-	// Rank by FusedScore (descending) — this is each result's intra-collection rank
-	sort.Slice(results, func(i, j int) bool {
-		return results[i].FusedScore > results[j].FusedScore
-	})
-
-	// Assign cross-collection RRF score based on position in merged list
-	for i := range results {
-		results[i].FusedScore = 1.0 / (k + float64(i+1))
+	byCol := make(map[string][]int)
+	for i, r := range results {
+		byCol[r.CollectionID] = append(byCol[r.CollectionID], i)
 	}
-
-	// Re-sort by new RRF score (already sorted since rank-based, but stable sort for ties)
-	sort.SliceStable(results, func(i, j int) bool {
-		return results[i].FusedScore > results[j].FusedScore
-	})
-
-	if len(results) > topK {
-		results = results[:topK]
+	local := make([]float64, len(results))
+	for _, idx := range byCol {
+		sort.SliceStable(idx, func(a, b int) bool { return results[idx[a]].FusedScore > results[idx[b]].FusedScore })
+		for rank, i := range idx {
+			local[i] = results[i].FusedScore
+			results[i].FusedScore = 1.0 / (k + float64(rank+1))
+		}
 	}
-	return results
+	order := make([]int, len(results))
+	for i := range order {
+		order[i] = i
+	}
+	sort.SliceStable(order, func(a, b int) bool {
+		ra, rb := results[order[a]].FusedScore, results[order[b]].FusedScore
+		if ra != rb {
+			return ra > rb
+		}
+		return local[order[a]] > local[order[b]]
+	})
+	if len(order) > topK {
+		order = order[:topK]
+	}
+	out := make([]SearchResult, len(order))
+	for i, j := range order {
+		out[i] = results[j]
+	}
+	return out
 }

@@ -55,3 +55,17 @@ type ChunkConfig struct {
 	Threshold float32 `json:"threshold"` // for semantic chunking
 	MaxTokens int     `json:"max_tokens"`
 }
+
+// Redacted returns a copy safe to return from APIs: credentials are masked.
+func (c *Collection) Redacted() *Collection {
+	cp := *c
+	cp.Connectors = append([]string(nil), c.Connectors...)
+	if c.Config.Embedder != nil {
+		e := *c.Config.Embedder
+		if e.APIKey != "" {
+			e.APIKey = "***"
+		}
+		cp.Config.Embedder = &e
+	}
+	return &cp
+}
