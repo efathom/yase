@@ -48,7 +48,7 @@ func (r *fakeReader) CommitMessages(_ context.Context, msgs ...kafka.Message) er
 }
 
 func (r *fakeReader) ReadLag(context.Context) (int64, error) { return 0, nil }
-func (r *fakeReader) Close() error                          { return nil }
+func (r *fakeReader) Close() error                           { return nil }
 
 func (r *fakeReader) committedOffset(p int) (int64, bool) {
 	r.mu.Lock()
