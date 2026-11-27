@@ -1,6 +1,6 @@
 # YASE — Yet Another Search Engine
 
-A production-grade, distributed hybrid search engine in Go, purpose-built for **retrieval-augmented generation (RAG) and agent-native search**. YASE fuses lexical and semantic retrieval — BM25 full-text search (Bluge) and HNSW vector similarity — into a single pipeline using Reciprocal Rank Fusion and an optional cross-encoder reranker, then serves results as *citable, attributed evidence* for LLMs.
+A distributed hybrid search engine in Go, purpose-built for **retrieval-augmented generation (RAG) and agent-native search**. YASE fuses lexical and semantic retrieval — BM25 full-text search (Bluge) and HNSW vector similarity — into a single pipeline using Reciprocal Rank Fusion and an optional cross-encoder reranker, then serves results as *citable, attributed evidence* for LLMs.
 
 ## Key Features
 
@@ -12,7 +12,7 @@ A production-grade, distributed hybrid search engine in Go, purpose-built for **
 - **Collections** — physically isolated search spaces with per-collection embedders and config, plus cross-collection fan-out merged via RRF.
 - **10 enterprise connectors** — Confluence, Jira, S3, PostgreSQL, MySQL, Google Drive, Salesforce, SharePoint, Slack, Twitter/X, plus a go-plugin system for custom sources.
 - **Distributed scale-out** — Raft consensus, consistent hashing, and scatter-gather across shards.
-- **Production-ready** — API-key/JWT auth, TLS, tenant isolation, rate limiting, audit logging, JSON logging, OpenTelemetry tracing, Prometheus metrics, and a Helm chart.
+- **Operable** — durable, crash-reconciled indexes with checkpointed Kafka commits and automatic compaction; API-key/JWT (incl. JWKS) auth, TLS, tenant isolation, Redis-backed rate limiting, audit logging, OpenTelemetry tracing, Prometheus metrics, and a hardened Helm chart.
 
 ## Why YASE for Agentic RAG
 
@@ -26,7 +26,7 @@ Retrieval for LLM agents differs from classic search: agents need **correctly-sc
 | **Keyword + semantic precision** | 5-stage pipeline: BM25 pre-filter → HNSW traversal → cosine rescore → RRF → cross-encoder rerank |
 | **Whole-corpus recall** | Cross-collection fan-out searches every collection and merges with RRF — no global "superset" duplication |
 | **Data sovereignty** | Self-hosted TEI embeddings — no documents or queries leave your infrastructure |
-| **Fresh indexes** | Deterministic chunk IDs + delete-before-write mean updated sources never leave stale chunks |
+| **Fresh indexes** | Each re-ingest atomically replaces a URL's previous chunks, so updated sources never leave stale chunks |
 | **Full provenance** | Every result carries its metadata (URL, author, timestamps) for transparent attribution |
 
 **One call, ready for your LLM:**

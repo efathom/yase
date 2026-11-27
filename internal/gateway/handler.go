@@ -3,9 +3,13 @@ package gateway
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
+	"net/netip"
+	"strings"
 	"time"
 
 	"github.com/efathom/yase/pkg/audit"
@@ -15,7 +19,6 @@ import (
 	"github.com/efathom/yase/pkg/embedder"
 	"github.com/efathom/yase/pkg/index"
 	"github.com/efathom/yase/pkg/metrics"
-	ingestionv1 "github.com/efathom/yase/proto/v1"
 )
 
 // SearchRequest is the JSON body for POST /search.
@@ -67,12 +70,13 @@ type Searcher interface {
 
 // Handler serves the search gateway HTTP endpoints.
 type Handler struct {
-	Searcher           Searcher
-	Embedder           embedder.Embedder
-	CollectionSearcher *collection.Searcher // nil if collections not initialized
-	Audit              *audit.Logger        // nil = audit disabled
-	Cache              *cache.SearchCache   // nil = cache disabled
-	authEnabled        bool                 // enables per-route scope enforcement
+	Searcher       Searcher
+	Embedder       embedder.Embedder
+	Collections    CollectionSearchBackend // nil if collections not initialized
+	trustedProxies []netip.Prefix
+	Audit          *audit.Logger      // nil = audit disabled
+	Cache          *cache.SearchCache // nil = cache disabled
+	authEnabled    bool               // enables per-route scope enforcement
 }
 
 // maxTopK caps the number of results a client may request, preventing
@@ -84,10 +88,27 @@ func NewHandler(searcher Searcher, emb embedder.Embedder) *Handler {
 	return &Handler{Searcher: searcher, Embedder: emb}
 }
 
-// WithCollectionSearcher sets the collection-aware searcher on the handler.
+// WithCollectionSearcher sets an in-process collection searcher.
 func (h *Handler) WithCollectionSearcher(cs *collection.Searcher) *Handler {
-	h.CollectionSearcher = cs
+	h.Collections = &LocalCollectionSearch{Searcher: cs}
 	return h
+}
+
+// WithCollectionBackend sets the collection search backend (local or remote).
+func (h *Handler) WithCollectionBackend(b CollectionSearchBackend) *Handler {
+	h.Collections = b
+	return h
+}
+
+// SetTrustedProxies lists the proxy networks whose X-Forwarded-For headers
+// are believed when determining the client IP for audit logs.
+func (h *Handler) SetTrustedProxies(cidrs []string) error {
+	prefixes, err := parseTrustedProxies(cidrs)
+	if err != nil {
+		return err
+	}
+	h.trustedProxies = prefixes
+	return nil
 }
 
 // SetAuthEnabled enables per-route scope enforcement (delete/admin). When
@@ -117,7 +138,7 @@ func (h *Handler) auditSearch(r *http.Request, query string, count int, duration
 	if ac := auth.FromContext(r.Context()); ac != nil {
 		tenantID, userID = ac.TenantID, ac.UserID
 	}
-	h.Audit.LogSearch(tenantID, userID, query, count, durationMs, clientIP(r))
+	h.Audit.LogSearch(tenantID, userID, query, count, durationMs, clientIP(r, h.trustedProxies))
 }
 
 func (h *Handler) auditDelete(r *http.Request, count int) {
@@ -128,24 +149,66 @@ func (h *Handler) auditDelete(r *http.Request, count int) {
 	if ac := auth.FromContext(r.Context()); ac != nil {
 		tenantID, userID = ac.TenantID, ac.UserID
 	}
-	h.Audit.LogDelete(tenantID, userID, count, clientIP(r))
+	h.Audit.LogDelete(tenantID, userID, count, clientIP(r, h.trustedProxies))
 }
 
-// clientIP extracts the client IP, honoring X-Forwarded-For for proxies.
-func clientIP(r *http.Request) string {
-	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-		for i := 0; i < len(xff); i++ {
-			if xff[i] == ',' {
-				return xff[:i]
-			}
+// parseTrustedProxies parses CIDRs or bare IPs.
+func parseTrustedProxies(cidrs []string) ([]netip.Prefix, error) {
+	out := make([]netip.Prefix, 0, len(cidrs))
+	for _, c := range cidrs {
+		if c = strings.TrimSpace(c); c == "" {
+			continue
 		}
-		return xff
+		if p, err := netip.ParsePrefix(c); err == nil {
+			out = append(out, p.Masked())
+			continue
+		}
+		a, err := netip.ParseAddr(c)
+		if err != nil {
+			return nil, fmt.Errorf("invalid trusted proxy %q", c)
+		}
+		out = append(out, netip.PrefixFrom(a, a.BitLen()))
 	}
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	return out, nil
+}
+
+func trusted(addr string, proxies []netip.Prefix) bool {
+	a, err := netip.ParseAddr(strings.TrimSpace(addr))
 	if err != nil {
-		return r.RemoteAddr
+		return false
 	}
-	return host
+	a = a.Unmap()
+	for _, p := range proxies {
+		if p.Contains(a) {
+			return true
+		}
+	}
+	return false
+}
+
+// clientIP returns the client address. X-Forwarded-For is honored only when
+// the direct peer is a trusted proxy; the client is then the right-most
+// address that is not itself a trusted proxy. Without this, any client could
+// forge its address in audit logs by sending the header.
+func clientIP(r *http.Request, proxies []netip.Prefix) string {
+	peer, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		peer = r.RemoteAddr
+	}
+	if len(proxies) == 0 || !trusted(peer, proxies) {
+		return peer
+	}
+	hops := strings.Split(r.Header.Get("X-Forwarded-For"), ",")
+	for i := len(hops) - 1; i >= 0; i-- {
+		h := strings.TrimSpace(hops[i])
+		if h == "" {
+			continue
+		}
+		if !trusted(h, proxies) {
+			return h
+		}
+	}
+	return peer
 }
 
 // DeleteSearcher extends Searcher with document deletion capability.
@@ -209,10 +272,8 @@ func (h *Handler) handleSearch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.Query == "" {
-		writeJSON(w, http.StatusBadRequest, SearchResponse{
-			Status: "error: query is required",
-		})
+	if msg := validateQuery(req.Query); msg != "" {
+		writeJSON(w, http.StatusBadRequest, SearchResponse{Status: "error: " + msg})
 		return
 	}
 
@@ -285,7 +346,7 @@ func (h *Handler) handleSearch(w http.ResponseWriter, r *http.Request) {
 
 // handleCollectionSearch handles POST /v1/collections/{id}/search — single collection.
 func (h *Handler) handleCollectionSearch(w http.ResponseWriter, r *http.Request) {
-	if h.CollectionSearcher == nil {
+	if h.Collections == nil {
 		writeJSON(w, http.StatusServiceUnavailable, SearchResponse{Status: "error: collections not initialized"})
 		return
 	}
@@ -301,29 +362,17 @@ func (h *Handler) handleCollectionSearch(w http.ResponseWriter, r *http.Request)
 		writeJSON(w, http.StatusBadRequest, SearchResponse{Status: "error: invalid JSON"})
 		return
 	}
-	if req.Query == "" {
-		writeJSON(w, http.StatusBadRequest, SearchResponse{Status: "error: query is required"})
+	if msg := validateQuery(req.Query); msg != "" {
+		writeJSON(w, http.StatusBadRequest, SearchResponse{Status: "error: " + msg})
 		return
 	}
 	req.TopK = clampTopK(req.TopK)
 	filters := auth.InjectTenantFilter(auth.FromContext(r.Context()), req.Filters)
 
-	emb, err := h.CollectionSearcher.GetEmbedder(colID)
-	if err != nil {
-		writeJSON(w, http.StatusNotFound, SearchResponse{Status: "error: collection not found"})
-		return
-	}
-
 	start := time.Now()
-	queryVec, err := emb.Embed(r.Context(), req.Query)
+	results, err := h.Collections.SearchCollections(r.Context(), callerTenant(r), []string{colID}, false, req.Query, filters, req.TopK)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, SearchResponse{Status: "error: embedding failed"})
-		return
-	}
-
-	results, err := h.CollectionSearcher.SearchSingle(r.Context(), callerTenant(r), colID, req.Query, queryVec, filters, req.TopK)
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, SearchResponse{Status: "error: search failed"})
+		h.writeSearchError(w, err)
 		return
 	}
 
@@ -333,7 +382,7 @@ func (h *Handler) handleCollectionSearch(w http.ResponseWriter, r *http.Request)
 
 // handleCrossCollectionSearch handles POST /v1/collections/search — multi-collection.
 func (h *Handler) handleCrossCollectionSearch(w http.ResponseWriter, r *http.Request) {
-	if h.CollectionSearcher == nil {
+	if h.Collections == nil {
 		writeJSON(w, http.StatusServiceUnavailable, SearchResponse{Status: "error: collections not initialized"})
 		return
 	}
@@ -343,30 +392,17 @@ func (h *Handler) handleCrossCollectionSearch(w http.ResponseWriter, r *http.Req
 		writeJSON(w, http.StatusBadRequest, SearchResponse{Status: "error: invalid JSON"})
 		return
 	}
-	if req.Query == "" {
-		writeJSON(w, http.StatusBadRequest, SearchResponse{Status: "error: query is required"})
+	if msg := validateQuery(req.Query); msg != "" {
+		writeJSON(w, http.StatusBadRequest, SearchResponse{Status: "error: " + msg})
 		return
 	}
 	req.TopK = clampTopK(req.TopK)
 	filters := auth.InjectTenantFilter(auth.FromContext(r.Context()), req.Filters)
 
-	// Use _default embedder for cross-collection queries
-	emb, err := h.CollectionSearcher.GetEmbedder("")
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, SearchResponse{Status: "error: embedder unavailable"})
-		return
-	}
-
 	start := time.Now()
-	queryVec, err := emb.Embed(r.Context(), req.Query)
+	results, err := h.Collections.SearchCollections(r.Context(), callerTenant(r), req.Collections, true, req.Query, filters, req.TopK)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, SearchResponse{Status: "error: embedding failed"})
-		return
-	}
-
-	results, err := h.CollectionSearcher.Search(r.Context(), callerTenant(r), req.Collections, req.Query, queryVec, filters, req.TopK)
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, SearchResponse{Status: "error: search failed"})
+		h.writeSearchError(w, err)
 		return
 	}
 
@@ -380,6 +416,33 @@ func (h *Handler) handleCrossCollectionSearch(w http.ResponseWriter, r *http.Req
 		Offset:   req.Offset,
 	}
 	h.writeCollectionSearchResponse(w, results, searchReq, start)
+}
+
+// writeSearchError maps backend errors to HTTP statuses without leaking detail.
+func (h *Handler) writeSearchError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, collection.ErrNotFound):
+		writeJSON(w, http.StatusNotFound, SearchResponse{Status: "error: collection not found"})
+	case errors.Is(err, index.ErrDimensionMismatch), errors.Is(err, collection.ErrInvalidConfig):
+		writeJSON(w, http.StatusBadRequest, SearchResponse{Status: "error: invalid search request"})
+	default:
+		slog.Error("search failed", "error", err)
+		writeJSON(w, http.StatusInternalServerError, SearchResponse{Status: "error: search failed"})
+	}
+}
+
+// maxQueryBytes bounds query text so a request cannot force huge BM25
+// expansions or embedding calls.
+const maxQueryBytes = 4096
+
+func validateQuery(q string) string {
+	switch {
+	case strings.TrimSpace(q) == "":
+		return "query is required"
+	case len(q) > maxQueryBytes:
+		return "query too long"
+	}
+	return ""
 }
 
 func (h *Handler) writeCollectionSearchResponse(w http.ResponseWriter, results []collection.SearchResult, req SearchRequest, start time.Time) {
@@ -479,42 +542,4 @@ func (s *LocalSearcher) Delete(ctx context.Context, docIDs []uint32, filters map
 
 func (s *LocalSearcher) DeleteByFilter(ctx context.Context, filters map[string]string) (int, error) {
 	return s.Engine.DeleteByFilter(ctx, filters)
-}
-
-// RemoteSearcher calls the IndexService gRPC server for search.
-type RemoteSearcher struct {
-	Client ingestionv1.IndexServiceClient
-}
-
-func (s *RemoteSearcher) HybridSearch(ctx context.Context, textQuery string, queryVec []float32, filters map[string]string, topK int) ([]index.ScoredResult, error) {
-	resp, err := s.Client.Search(ctx, &ingestionv1.SearchRequest{
-		Query:       textQuery,
-		QueryVector: queryVec,
-		Filters:     filters,
-		TopK:        int32(topK),
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	results := make([]index.ScoredResult, len(resp.Results))
-	for i, r := range resp.Results {
-		results[i] = index.ScoredResult{
-			ID:            r.Id,
-			FusedScore:    r.FusedScore,
-			BM25Score:     r.Bm25Score,
-			SemanticScore: r.SemanticScore,
-		}
-	}
-	return results, nil
-}
-
-func (s *RemoteSearcher) NodeCount() int {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-	resp, err := s.Client.Stats(ctx, &ingestionv1.StatsRequest{})
-	if err != nil {
-		return 0
-	}
-	return int(resp.HnswNodes)
 }

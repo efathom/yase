@@ -11,8 +11,11 @@ RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o /bin/indexer ./cmd/indexer
 
 FROM alpine:3.21
 RUN apk add --no-cache ca-certificates
+RUN addgroup -S -g 10001 yase && adduser -S -D -H -u 10001 -G yase yase \
+    && mkdir -p /data/yase && chown -R 10001:10001 /data/yase
 COPY --from=builder /bin/indexer /usr/local/bin/indexer
 COPY configs/default.yaml /etc/yase/config.yaml
 
 EXPOSE 50052 9090
+USER 10001:10001
 ENTRYPOINT ["indexer", "-config", "/etc/yase/config.yaml"]

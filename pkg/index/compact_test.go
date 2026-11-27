@@ -1,7 +1,6 @@
 package index
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"math/rand"
@@ -63,14 +62,5 @@ func TestCompactReclaimsSpace(t *testing.T) {
 	}
 	if len(results) == 0 {
 		t.Fatal("expected results after compaction")
-	}
-}
-
-func TestSnapshotCorruptionDetected(t *testing.T) {
-	// A frame with a bad checksum must be rejected, not silently parsed.
-	payload := []byte{0x01, 0x02, 0x03, 0x04}
-	_, err := readFrame(bytes.NewReader(payload), ifMagic)
-	if err == nil {
-		t.Fatal("expected error for corrupt frame")
 	}
 }

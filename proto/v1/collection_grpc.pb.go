@@ -25,6 +25,9 @@ const (
 	CollectionService_UpdateCollection_FullMethodName = "/yase.ingestion.v1.CollectionService/UpdateCollection"
 	CollectionService_DeleteCollection_FullMethodName = "/yase.ingestion.v1.CollectionService/DeleteCollection"
 	CollectionService_SearchCollection_FullMethodName = "/yase.ingestion.v1.CollectionService/SearchCollection"
+	CollectionService_BindConnector_FullMethodName    = "/yase.ingestion.v1.CollectionService/BindConnector"
+	CollectionService_UnbindConnector_FullMethodName  = "/yase.ingestion.v1.CollectionService/UnbindConnector"
+	CollectionService_CollectionStats_FullMethodName  = "/yase.ingestion.v1.CollectionService/CollectionStats"
 )
 
 // CollectionServiceClient is the client API for CollectionService service.
@@ -39,6 +42,9 @@ type CollectionServiceClient interface {
 	UpdateCollection(ctx context.Context, in *UpdateCollectionRequest, opts ...grpc.CallOption) (*CollectionResponse, error)
 	DeleteCollection(ctx context.Context, in *DeleteCollectionRequest, opts ...grpc.CallOption) (*DeleteCollectionResponse, error)
 	SearchCollection(ctx context.Context, in *CollectionSearchRequest, opts ...grpc.CallOption) (*CollectionSearchResponse, error)
+	BindConnector(ctx context.Context, in *BindConnectorRequest, opts ...grpc.CallOption) (*CollectionResponse, error)
+	UnbindConnector(ctx context.Context, in *BindConnectorRequest, opts ...grpc.CallOption) (*CollectionResponse, error)
+	CollectionStats(ctx context.Context, in *GetCollectionRequest, opts ...grpc.CallOption) (*CollectionStatsResponse, error)
 }
 
 type collectionServiceClient struct {
@@ -109,6 +115,36 @@ func (c *collectionServiceClient) SearchCollection(ctx context.Context, in *Coll
 	return out, nil
 }
 
+func (c *collectionServiceClient) BindConnector(ctx context.Context, in *BindConnectorRequest, opts ...grpc.CallOption) (*CollectionResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(CollectionResponse)
+	err := c.cc.Invoke(ctx, CollectionService_BindConnector_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *collectionServiceClient) UnbindConnector(ctx context.Context, in *BindConnectorRequest, opts ...grpc.CallOption) (*CollectionResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(CollectionResponse)
+	err := c.cc.Invoke(ctx, CollectionService_UnbindConnector_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *collectionServiceClient) CollectionStats(ctx context.Context, in *GetCollectionRequest, opts ...grpc.CallOption) (*CollectionStatsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(CollectionStatsResponse)
+	err := c.cc.Invoke(ctx, CollectionService_CollectionStats_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // CollectionServiceServer is the server API for CollectionService service.
 // All implementations must embed UnimplementedCollectionServiceServer
 // for forward compatibility.
@@ -121,6 +157,9 @@ type CollectionServiceServer interface {
 	UpdateCollection(context.Context, *UpdateCollectionRequest) (*CollectionResponse, error)
 	DeleteCollection(context.Context, *DeleteCollectionRequest) (*DeleteCollectionResponse, error)
 	SearchCollection(context.Context, *CollectionSearchRequest) (*CollectionSearchResponse, error)
+	BindConnector(context.Context, *BindConnectorRequest) (*CollectionResponse, error)
+	UnbindConnector(context.Context, *BindConnectorRequest) (*CollectionResponse, error)
+	CollectionStats(context.Context, *GetCollectionRequest) (*CollectionStatsResponse, error)
 	mustEmbedUnimplementedCollectionServiceServer()
 }
 
@@ -148,6 +187,15 @@ func (UnimplementedCollectionServiceServer) DeleteCollection(context.Context, *D
 }
 func (UnimplementedCollectionServiceServer) SearchCollection(context.Context, *CollectionSearchRequest) (*CollectionSearchResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method SearchCollection not implemented")
+}
+func (UnimplementedCollectionServiceServer) BindConnector(context.Context, *BindConnectorRequest) (*CollectionResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method BindConnector not implemented")
+}
+func (UnimplementedCollectionServiceServer) UnbindConnector(context.Context, *BindConnectorRequest) (*CollectionResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method UnbindConnector not implemented")
+}
+func (UnimplementedCollectionServiceServer) CollectionStats(context.Context, *GetCollectionRequest) (*CollectionStatsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method CollectionStats not implemented")
 }
 func (UnimplementedCollectionServiceServer) mustEmbedUnimplementedCollectionServiceServer() {}
 func (UnimplementedCollectionServiceServer) testEmbeddedByValue()                           {}
@@ -278,6 +326,60 @@ func _CollectionService_SearchCollection_Handler(srv interface{}, ctx context.Co
 	return interceptor(ctx, in, info, handler)
 }
 
+func _CollectionService_BindConnector_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(BindConnectorRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CollectionServiceServer).BindConnector(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: CollectionService_BindConnector_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CollectionServiceServer).BindConnector(ctx, req.(*BindConnectorRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _CollectionService_UnbindConnector_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(BindConnectorRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CollectionServiceServer).UnbindConnector(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: CollectionService_UnbindConnector_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CollectionServiceServer).UnbindConnector(ctx, req.(*BindConnectorRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _CollectionService_CollectionStats_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetCollectionRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CollectionServiceServer).CollectionStats(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: CollectionService_CollectionStats_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CollectionServiceServer).CollectionStats(ctx, req.(*GetCollectionRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // CollectionService_ServiceDesc is the grpc.ServiceDesc for CollectionService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -308,6 +410,18 @@ var CollectionService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "SearchCollection",
 			Handler:    _CollectionService_SearchCollection_Handler,
+		},
+		{
+			MethodName: "BindConnector",
+			Handler:    _CollectionService_BindConnector_Handler,
+		},
+		{
+			MethodName: "UnbindConnector",
+			Handler:    _CollectionService_UnbindConnector_Handler,
+		},
+		{
+			MethodName: "CollectionStats",
+			Handler:    _CollectionService_CollectionStats_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

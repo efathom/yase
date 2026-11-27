@@ -13,7 +13,8 @@ import (
 // Binary format:
 //   Header: magic(4) + version(4) + nodeCount(4) + maxLevel(4) + entryPointID(4)
 //           + vecDim(4) + M(4) + Mmax0(4) + EfConstruction(4) + EfSearch(4) = 40 bytes
-//   Per node: ID(4) + Level(4) + VectorOffset(8) + numLayers(4)
+//   Per node: ID(4) + Level(4) + VectorOffset(8) + BinaryVectorOffset(8)
+//             + BinaryVectorLen(4) + numLayers(4) = 32 bytes
 //     Per layer: edgeCount(4) + edges(edgeCount * 4)
 
 var graphMagic = [4]byte{'H', 'N', 'S', 'W'}
@@ -21,6 +22,12 @@ var graphMagic = [4]byte{'H', 'N', 'S', 'W'}
 const graphVersion uint32 = 2
 
 const graphHeaderSize = 40
+
+// Sanity bounds applied when restoring a snapshot.
+const (
+	maxPersistedLevel = 64      // HNSW levels are logarithmic; 64 is far beyond any real graph
+	maxPersistedEdges = 1 << 16 // edges per layer are bounded by M / Mmax0
+)
 
 // Snapshot serializes the graph topology to a binary format.
 // Acquires a read lock for the duration of the write.
@@ -38,7 +45,8 @@ func (g *Graph) Snapshot(w io.Writer) error {
 	header := make([]byte, graphHeaderSize)
 	copy(header[0:4], graphMagic[:])
 	binary.LittleEndian.PutUint32(header[4:8], graphVersion)
-	binary.LittleEndian.PutUint32(header[8:12], uint32(len(g.nodes)))
+	ids := g.nodes.ids()
+	binary.LittleEndian.PutUint32(header[8:12], uint32(len(ids)))
 	binary.LittleEndian.PutUint32(header[12:16], uint32(g.maxLevel))
 	binary.LittleEndian.PutUint32(header[16:20], entryPointID)
 	binary.LittleEndian.PutUint32(header[20:24], uint32(g.cfg.VecDim))
@@ -52,15 +60,11 @@ func (g *Graph) Snapshot(w io.Writer) error {
 	}
 
 	// Sort node IDs for deterministic output
-	ids := make([]uint32, 0, len(g.nodes))
-	for id := range g.nodes {
-		ids = append(ids, id)
-	}
 	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
 
 	// Per node
 	for _, id := range ids {
-		node := g.nodes[id]
+		node := g.nodes.get(id)
 		numLayers := node.Level + 1
 
 		// Node header: ID(4) + Level(4) + VectorOffset(8) + BinaryVectorOffset(8) + BinaryVectorLen(4) + numLayers(4) = 32 bytes
@@ -165,6 +169,12 @@ func RestoreGraph(r io.Reader, arena memory.Arena, cfg Config) (*Graph, error) {
 		binaryVectorLen := int(binary.LittleEndian.Uint32(nodeBuf[24:28]))
 		numLayers := int(binary.LittleEndian.Uint32(nodeBuf[28:32]))
 
+		// Bounds-check before allocating so a corrupt file cannot trigger a
+		// huge allocation or an out-of-range edge slice.
+		if level < 0 || level > maxPersistedLevel || numLayers != level+1 {
+			return nil, fmt.Errorf("corrupt graph snapshot: node %d level=%d layers=%d", id, level, numLayers)
+		}
+
 		node := &Node{
 			ID:                 id,
 			Level:              level,
@@ -180,6 +190,9 @@ func RestoreGraph(r io.Reader, arena memory.Arena, cfg Config) (*Graph, error) {
 				return nil, fmt.Errorf("read edge count node %d layer %d: %w", id, layer, err)
 			}
 			edgeCount := int(binary.LittleEndian.Uint32(edgeCountBuf))
+			if edgeCount < 0 || edgeCount > maxPersistedEdges {
+				return nil, fmt.Errorf("corrupt graph snapshot: node %d layer %d edgeCount=%d", id, layer, edgeCount)
+			}
 
 			edges := make([]uint32, edgeCount)
 			if edgeCount > 0 {
@@ -194,12 +207,17 @@ func RestoreGraph(r io.Reader, arena memory.Arena, cfg Config) (*Graph, error) {
 			node.Edges[layer].Store(&edges)
 		}
 
-		g.nodes[id] = node
+		g.nodes.set(id, node)
 	}
 
+	if maxLevel < 0 || maxLevel > maxPersistedLevel {
+		return nil, fmt.Errorf("corrupt graph snapshot: maxLevel=%d", maxLevel)
+	}
 	// Set entry point
-	if ep, ok := g.nodes[entryPointID]; ok {
+	if ep := g.nodes.get(entryPointID); ep != nil {
 		g.entryPoint.Store(ep)
+	} else if nodeCount > 0 {
+		return nil, fmt.Errorf("corrupt graph snapshot: entry point %d not found", entryPointID)
 	}
 
 	return g, nil

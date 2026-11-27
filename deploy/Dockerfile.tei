@@ -17,4 +17,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY --from=builder /build/target/release/text-embeddings-router /usr/local/bin/
 ENV HF_HOME=/data
 
+RUN useradd --system --uid 10001 --create-home tei
+USER 10001
 ENTRYPOINT ["text-embeddings-router"]

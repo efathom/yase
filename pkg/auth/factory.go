@@ -1,7 +1,10 @@
 package auth
 
 import (
+	"crypto"
 	"fmt"
+	"os"
+	"strings"
 
 	"github.com/efathom/yase/pkg/config"
 )
@@ -27,10 +30,32 @@ func NewFromConfig(cfg config.AuthConfig) (Authenticator, error) {
 		}
 		return NewAPIKeyAuthenticator(entries), nil
 	case "jwt":
-		if len(cfg.JWT.Secret) < 16 {
+		if cfg.JWT.Secret == "" && cfg.JWT.PublicKeyPath == "" && cfg.JWT.JWKSURL == "" {
+			return nil, fmt.Errorf("auth.jwt: one of secret, public_key_path or jwks_url is required")
+		}
+		if cfg.JWT.Secret != "" && len(cfg.JWT.Secret) < 16 {
 			return nil, fmt.Errorf("auth.jwt.secret: must be at least 16 characters")
 		}
+		var pub crypto.PublicKey
+		if cfg.JWT.PublicKeyPath != "" {
+			data, err := os.ReadFile(cfg.JWT.PublicKeyPath)
+			if err != nil {
+				return nil, fmt.Errorf("auth.jwt.public_key_path: %w", err)
+			}
+			if pub, err = ParsePublicKeyPEM(data); err != nil {
+				return nil, fmt.Errorf("auth.jwt.public_key_path: %w", err)
+			}
+		}
+		var jwks *JWKSCache
+		if cfg.JWT.JWKSURL != "" {
+			if !strings.HasPrefix(cfg.JWT.JWKSURL, "https://") {
+				return nil, fmt.Errorf("auth.jwt.jwks_url: must use https")
+			}
+			jwks = NewJWKSCache(cfg.JWT.JWKSURL)
+		}
 		return NewJWTAuthenticator(JWTConfig{
+			PublicKey:     pub,
+			JWKS:          jwks,
 			Secret:        cfg.JWT.Secret,
 			Issuer:        cfg.JWT.Issuer,
 			Audience:      cfg.JWT.Audience,

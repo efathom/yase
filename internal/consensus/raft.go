@@ -1,6 +1,7 @@
 package consensus
 
 import (
+	"crypto/tls"
 	"fmt"
 	"net"
 	"os"
@@ -17,6 +18,11 @@ type RaftNodeConfig struct {
 	BindAddr  string // host:port for Raft transport
 	DataDir   string // directory for Raft logs and snapshots
 	Bootstrap bool   // true for the first node in a new cluster
+
+	// ServerTLS/ClientTLS enable mutually authenticated TLS for Raft traffic.
+	// Both nil = plain TCP (only acceptable on a trusted private network).
+	ServerTLS *tls.Config
+	ClientTLS *tls.Config
 }
 
 // RaftNode wraps a hashicorp/raft instance with the YASE cluster FSM.
@@ -42,9 +48,19 @@ func NewRaftNode(cfg RaftNodeConfig) (*RaftNode, error) {
 	if err != nil {
 		return nil, fmt.Errorf("resolve addr: %w", err)
 	}
-	transport, err := raft.NewTCPTransport(cfg.BindAddr, addr, 3, 10*time.Second, os.Stderr)
-	if err != nil {
-		return nil, fmt.Errorf("tcp transport: %w", err)
+	var transport raft.Transport
+	if cfg.ServerTLS != nil || cfg.ClientTLS != nil {
+		t, err := newTLSTransport(cfg.BindAddr, addr, cfg.ServerTLS, cfg.ClientTLS)
+		if err != nil {
+			return nil, fmt.Errorf("tls transport: %w", err)
+		}
+		transport = t
+	} else {
+		t, err := raft.NewTCPTransport(cfg.BindAddr, addr, 3, 10*time.Second, os.Stderr)
+		if err != nil {
+			return nil, fmt.Errorf("tcp transport: %w", err)
+		}
+		transport = t
 	}
 
 	// Log store and stable store (BoltDB-backed)

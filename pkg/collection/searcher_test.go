@@ -155,3 +155,28 @@ func TestSearcher_GetEmbedder(t *testing.T) {
 	_, err = s.GetEmbedder("nonexistent")
 	assert.Error(t, err)
 }
+
+func TestPooledFusionKeepsSameIDFromDifferentCollections(t *testing.T) {
+	in := []SearchResult{
+		{ScoredResult: index.ScoredResult{ID: 1, SemanticScore: 0.9, BM25Score: 2}, CollectionID: "a"},
+		{ScoredResult: index.ScoredResult{ID: 1, SemanticScore: 0.2}, CollectionID: "b"},
+		{ScoredResult: index.ScoredResult{ID: 2, SemanticScore: 0.5}, CollectionID: "a"},
+	}
+	out := pooledFusion(in, 10)
+	assert.Len(t, out, 3, "equal IDs in different collections are distinct documents")
+	assert.Equal(t, "a", out[0].CollectionID)
+	assert.Equal(t, uint32(1), out[0].ID)
+	assert.Equal(t, "b", out[2].CollectionID, "the weak match ranks last globally")
+}
+
+func TestCrossCollectionRRFInterleavesByLocalRank(t *testing.T) {
+	in := []SearchResult{
+		{ScoredResult: index.ScoredResult{ID: 1, FusedScore: 0.03}, CollectionID: "a"},
+		{ScoredResult: index.ScoredResult{ID: 2, FusedScore: 0.02}, CollectionID: "a"},
+		{ScoredResult: index.ScoredResult{ID: 9, FusedScore: 0.01}, CollectionID: "b"},
+	}
+	out := crossCollectionRRF(in, 10)
+	require.Len(t, out, 3)
+	assert.Equal(t, uint32(1), out[0].ID)
+	assert.Equal(t, uint32(9), out[1].ID, "b's best result ranks with a's best, ahead of a's second")
+}

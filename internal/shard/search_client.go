@@ -4,20 +4,26 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"sync/atomic"
 
 	"github.com/efathom/yase/internal/query"
 	"github.com/efathom/yase/pkg/index"
 	ingestionv1 "github.com/efathom/yase/proto/v1"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/status"
 )
 
 // RemoteShardSearcher implements query.ShardSearcher by calling remote
-// cluster nodes via gRPC ShardSearchService.
+// cluster nodes via gRPC ShardSearchService. Each shard may have several
+// replicas; requests rotate across them and fail over to the next replica
+// when one is unavailable.
 type RemoteShardSearcher struct {
 	mu       sync.RWMutex
 	conns    map[string]*grpc.ClientConn // nodeAddr → conn
-	nodes    map[uint32]string           // shardID → nodeAddr
+	replicas map[uint32][]string         // shardID → replica addresses
+	next     atomic.Uint64               // round-robin cursor
 	dialOpts []grpc.DialOption
 }
 
@@ -31,21 +37,22 @@ func NewRemoteShardSearcher(opts ...grpc.DialOption) *RemoteShardSearcher {
 	}
 	return &RemoteShardSearcher{
 		conns:    make(map[string]*grpc.ClientConn),
-		nodes:    make(map[uint32]string),
+		replicas: make(map[uint32][]string),
 		dialOpts: opts,
 	}
 }
 
-// UpdateTopology updates the shard-to-node mapping. Called when Raft state changes.
-// Connections to nodes no longer present in the topology are closed.
-func (r *RemoteShardSearcher) UpdateTopology(shardToNode map[uint32]string) {
+// UpdateTopology replaces the shard → replica-address mapping. Connections to
+// addresses no longer present are closed.
+func (r *RemoteShardSearcher) UpdateTopology(shardReplicas map[uint32][]string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	// Close and drop connections to addresses that left the topology.
-	active := make(map[string]bool, len(shardToNode))
-	for _, addr := range shardToNode {
-		active[addr] = true
+	active := make(map[string]bool)
+	for _, addrs := range shardReplicas {
+		for _, a := range addrs {
+			active[a] = true
+		}
 	}
 	for addr, conn := range r.conns {
 		if !active[addr] {
@@ -54,48 +61,71 @@ func (r *RemoteShardSearcher) UpdateTopology(shardToNode map[uint32]string) {
 		}
 	}
 
-	r.nodes = make(map[uint32]string, len(shardToNode))
-	for k, v := range shardToNode {
-		r.nodes[k] = v
+	r.replicas = make(map[uint32][]string, len(shardReplicas))
+	for k, v := range shardReplicas {
+		r.replicas[k] = append([]string(nil), v...)
 	}
 }
 
-// SearchShard calls the remote node hosting the given shard via gRPC.
+// retryable reports whether another replica might succeed.
+func retryable(err error) bool {
+	switch status.Code(err) {
+	case codes.Unavailable, codes.DeadlineExceeded, codes.ResourceExhausted, codes.Aborted, codes.Internal, codes.Unknown:
+		return true
+	}
+	return false
+}
+
+// SearchShard queries one replica of the shard, failing over to the others.
 func (r *RemoteShardSearcher) SearchShard(ctx context.Context, shardID uint32, queryText string, queryVec []float32, filters map[string]string, topK int) ([]index.ScoredResult, error) {
 	r.mu.RLock()
-	addr, ok := r.nodes[shardID]
+	addrs := r.replicas[shardID]
 	r.mu.RUnlock()
-
-	if !ok {
-		return nil, fmt.Errorf("no node known for shard %d", shardID)
+	if len(addrs) == 0 {
+		return nil, fmt.Errorf("no replica known for shard %d", shardID)
 	}
 
-	client, err := r.getClient(addr)
-	if err != nil {
-		return nil, fmt.Errorf("connect to %s: %w", addr, err)
-	}
-
-	resp, err := client.SearchShard(ctx, &ingestionv1.ShardSearchRequest{
-		ShardId:     shardID,
-		Query:       queryText,
-		QueryVector: queryVec,
-		Filters:     filters,
-		TopK:        int32(topK),
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	results := make([]index.ScoredResult, len(resp.Results))
-	for i, r := range resp.Results {
-		results[i] = index.ScoredResult{
-			ID:            r.Id,
-			FusedScore:    r.FusedScore,
-			BM25Score:     r.Bm25Score,
-			SemanticScore: r.SemanticScore,
+	start := int(r.next.Add(1) % uint64(len(addrs)))
+	var lastErr error
+	for i := 0; i < len(addrs); i++ {
+		if ctx.Err() != nil {
+			break
 		}
+		addr := addrs[(start+i)%len(addrs)]
+		client, err := r.getClient(addr)
+		if err != nil {
+			lastErr = fmt.Errorf("connect to %s: %w", addr, err)
+			continue
+		}
+		resp, err := client.SearchShard(ctx, &ingestionv1.ShardSearchRequest{
+			ShardId:     shardID,
+			Query:       queryText,
+			QueryVector: queryVec,
+			Filters:     filters,
+			TopK:        int32(topK),
+		})
+		if err != nil {
+			lastErr = fmt.Errorf("replica %s: %w", addr, err)
+			if !retryable(err) {
+				return nil, lastErr
+			}
+			continue
+		}
+		results := make([]index.ScoredResult, len(resp.Results))
+		for i, x := range resp.Results {
+			results[i] = index.ScoredResult{
+				ID:            x.Id,
+				FusedScore:    x.FusedScore,
+				BM25Score:     x.Bm25Score,
+				SemanticScore: x.SemanticScore,
+			}
+		}
+		return results, nil
 	}
-	return results, nil
+	if lastErr == nil {
+		lastErr = ctx.Err()
+	}
+	return nil, lastErr
 }
 
 func (r *RemoteShardSearcher) getClient(addr string) (ingestionv1.ShardSearchServiceClient, error) {

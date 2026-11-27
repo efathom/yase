@@ -219,3 +219,16 @@ func (s *testSnapshotSink) Write(p []byte) (int, error) { return s.buf.Write(p) 
 func (s *testSnapshotSink) Close() error                { return nil }
 func (s *testSnapshotSink) ID() string                  { return "test" }
 func (s *testSnapshotSink) Cancel() error               { return nil }
+
+func TestAddReplicaIsIdempotent(t *testing.T) {
+	cs := NewClusterState()
+	applyCmd(t, cs, &Command{Type: CmdRegisterNode, RegisterNode: &RegisterNode{ID: "n1", Address: "a:1"}})
+	applyCmd(t, cs, &Command{Type: CmdRegisterNode, RegisterNode: &RegisterNode{ID: "n2", Address: "a:2"}})
+	for _, n := range []string{"n1", "n2", "n1"} {
+		applyCmd(t, cs, &Command{Type: CmdAddReplica, AddReplica: &AddReplica{ShardID: 4, NodeID: n}})
+	}
+	sh := cs.Shards[4]
+	if sh == nil || len(sh.Replicas) != 2 || sh.Replicas[0] != "n1" || sh.Replicas[1] != "n2" {
+		t.Fatalf("replicas = %+v, want [n1 n2]", sh)
+	}
+}

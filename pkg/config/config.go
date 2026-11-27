@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"reflect"
 	"strings"
 	"time"
 
@@ -66,6 +67,15 @@ type ClusterConfig struct {
 	Bootstrap bool   `mapstructure:"bootstrap"`
 	JoinAddr  string `mapstructure:"join_addr"`  // leader address to join
 	ShardPort int    `mapstructure:"shard_port"` // gRPC port for ShardSearchService
+
+	// HTTPAddr is the cluster management API listen address. Defaults to
+	// loopback; a routable address requires JoinToken.
+	HTTPAddr string `mapstructure:"http_addr"`
+	// JoinToken is the shared secret required by the cluster management API
+	// (join, leave, alias and shard changes).
+	JoinToken string `mapstructure:"join_token"`
+	// NumShards is the number of logical shards documents are hashed into.
+	NumShards int `mapstructure:"num_shards"`
 }
 
 type ServerConfig struct {
@@ -74,6 +84,14 @@ type ServerConfig struct {
 	HTTPPort       int           `mapstructure:"http_port"`
 	MaxRecvMsgSize int           `mapstructure:"max_recv_msg_size"`
 	ShutdownGrace  time.Duration `mapstructure:"shutdown_grace"`
+
+	// TrustedProxies lists proxy CIDRs/IPs whose X-Forwarded-For header is
+	// believed for client IPs (audit logs). Empty: the header is ignored.
+	TrustedProxies []string `mapstructure:"trusted_proxies"`
+
+	// HealthPort serves /health and /ready on processes without a public
+	// HTTP API (indexer, cluster node). 0 disables it.
+	HealthPort int `mapstructure:"health_port"`
 }
 
 type KafkaConfig struct {
@@ -86,6 +104,10 @@ type KafkaConfig struct {
 	BatchTimeout      time.Duration `mapstructure:"batch_timeout"`
 	RequiredAcks      int           `mapstructure:"required_acks"`
 	DLQTopic          string        `mapstructure:"dlq_topic"` // dead-letter topic ("" = disabled)
+
+	Workers        int           `mapstructure:"workers"`         // concurrent indexing workers (per-key ordered)
+	MaxAttempts    int           `mapstructure:"max_attempts"`    // attempts before dead-lettering
+	CommitInterval time.Duration `mapstructure:"commit_interval"` // checkpoint + offset commit cadence
 }
 
 type RedisConfig struct {
@@ -108,6 +130,13 @@ type IndexConfig struct {
 	CentroidRate int    `mapstructure:"centroid_rate"`
 	GRPCHost     string `mapstructure:"grpc_host"`
 	GRPCPort     int    `mapstructure:"grpc_port"`
+
+	CheckpointInterval time.Duration `mapstructure:"checkpoint_interval"` // periodic durable snapshot
+	CompactDeadRatio   float64       `mapstructure:"compact_dead_ratio"`  // compact when dead/used exceeds this
+	DefaultTTL         time.Duration `mapstructure:"default_ttl"`         // 0 = documents never expire by default
+	TTLSweepInterval   time.Duration `mapstructure:"ttl_sweep_interval"`
+	FlatSearchMax      int           `mapstructure:"flat_search_max"` // filters matching <= this many docs are searched exactly
+	ANNProbes          int           `mapstructure:"ann_probes"`      // centroids probed per query (0 = scale with corpus)
 }
 
 type CrawlerConfig struct {
@@ -199,6 +228,11 @@ type JWTAuthConfig struct {
 	// multi-tenancy: an empty tenant yields a context the tenant filter
 	// cannot narrow.
 	RequireTenant bool `mapstructure:"require_tenant"`
+
+	// PublicKeyPath (PEM, RSA ≥2048 or P-256) enables RS256/ES256 tokens.
+	PublicKeyPath string `mapstructure:"public_key_path"`
+	// JWKSURL fetches RS256/ES256 verification keys from an identity provider.
+	JWKSURL string `mapstructure:"jwks_url"`
 }
 
 type TLSConfig struct {
@@ -210,7 +244,10 @@ type TLSConfig struct {
 }
 
 type RateLimitConfig struct {
-	Enabled          bool    `mapstructure:"enabled"`
+	Enabled bool `mapstructure:"enabled"`
+	// Backend is "memory" (per process) or "redis" (shared by all gateway
+	// replicas, using the redis section).
+	Backend          string  `mapstructure:"backend"`
 	DefaultSearchQPS float64 `mapstructure:"default_search_qps"`
 	DefaultIngestRPS float64 `mapstructure:"default_ingest_rps"`
 }
@@ -221,6 +258,11 @@ type CollectionManagerConfig struct {
 	DefaultArena      uint64 `mapstructure:"default_arena"`
 	MaxCollections    int    `mapstructure:"max_collections"`
 	DefaultCollection string `mapstructure:"default_collection"`
+
+	// AllowedEmbedderHosts lists the hosts (host or host:port) a collection
+	// may point its own embedder base_url at. Empty means per-collection
+	// embedder URLs are rejected, preventing SSRF via collection configs.
+	AllowedEmbedderHosts []string `mapstructure:"allowed_embedder_hosts"`
 }
 
 type ConnectorManagerConfig struct {
@@ -243,6 +285,7 @@ func Load(configPath string) (*Config, error) {
 	v.SetDefault("server.http_port", 8000)
 	v.SetDefault("server.max_recv_msg_size", 16*1024*1024) // 16MB
 	v.SetDefault("server.shutdown_grace", "15s")
+	v.SetDefault("server.health_port", 8090)
 
 	// Kafka defaults
 	v.SetDefault("kafka.brokers", []string{"localhost:9092"})
@@ -254,6 +297,9 @@ func Load(configPath string) (*Config, error) {
 	v.SetDefault("kafka.batch_timeout", "10ms")
 	v.SetDefault("kafka.required_acks", -1) // all ISR
 	v.SetDefault("kafka.dlq_topic", "")
+	v.SetDefault("kafka.workers", 4)
+	v.SetDefault("kafka.max_attempts", 3)
+	v.SetDefault("kafka.commit_interval", "5s")
 
 	// Redis defaults
 	v.SetDefault("redis.addr", "localhost:6379")
@@ -269,10 +315,15 @@ func Load(configPath string) (*Config, error) {
 
 	// Index defaults
 	v.SetDefault("index.path", "/data/yase/bluge")
-	v.SetDefault("index.arena_size_bytes", uint64(4*1024*1024*1024)) // 4GB
-	v.SetDefault("index.centroid_rate", 5)                           // 20% centroids
+	v.SetDefault("index.arena_size_bytes", uint64(64<<30)) // upper bound; grows on demand
+	v.SetDefault("index.centroid_rate", 5)                 // 20% centroids
 	v.SetDefault("index.grpc_host", "localhost")
 	v.SetDefault("index.grpc_port", 50052)
+	v.SetDefault("index.checkpoint_interval", "1m")
+	v.SetDefault("index.compact_dead_ratio", 0.3)
+	v.SetDefault("index.default_ttl", "0s")
+	v.SetDefault("index.ttl_sweep_interval", "10m")
+	v.SetDefault("index.flat_search_max", 20000)
 
 	// Crawler defaults
 	v.SetDefault("crawler.max_workers", 2000)
@@ -301,12 +352,13 @@ func Load(configPath string) (*Config, error) {
 	v.SetDefault("auth.method", "api_key")
 	v.SetDefault("tls.enabled", false)
 	v.SetDefault("rate_limit.enabled", false)
+	v.SetDefault("rate_limit.backend", "memory")
 	v.SetDefault("rate_limit.default_search_qps", 100)
 	v.SetDefault("rate_limit.default_ingest_rps", 50)
 
 	// Collection defaults
 	v.SetDefault("collections.base_path", "/data/yase/collections")
-	v.SetDefault("collections.default_arena", uint64(1<<30)) // 1GB per collection
+	v.SetDefault("collections.default_arena", uint64(64<<30)) // per-collection upper bound; grows on demand
 	v.SetDefault("collections.max_collections", 100)
 	v.SetDefault("collections.default_collection", "_default")
 
@@ -324,6 +376,8 @@ func Load(configPath string) (*Config, error) {
 	v.SetDefault("cluster.bootstrap", false)
 	v.SetDefault("cluster.join_addr", "")
 	v.SetDefault("cluster.shard_port", 50053)
+	v.SetDefault("cluster.http_addr", "127.0.0.1:7080")
+	v.SetDefault("cluster.num_shards", 3)
 
 	// Audit defaults
 	v.SetDefault("audit.enabled", false)
@@ -377,6 +431,9 @@ func Load(configPath string) (*Config, error) {
 	v.SetEnvPrefix("YASE")
 	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
 	v.AutomaticEnv()
+	// AutomaticEnv only consults keys viper already knows (defaults or the
+	// config file); bind every field so any setting can come from the env.
+	bindEnvs(v, reflect.TypeOf(Config{}), "")
 
 	var cfg Config
 	if err := v.Unmarshal(&cfg); err != nil {
@@ -384,4 +441,28 @@ func Load(configPath string) (*Config, error) {
 	}
 
 	return &cfg, nil
+}
+
+// bindEnvs registers every mapstructure key of t (recursively) with viper.
+func bindEnvs(v *viper.Viper, t reflect.Type, prefix string) {
+	for i := 0; i < t.NumField(); i++ {
+		f := t.Field(i)
+		tag := f.Tag.Get("mapstructure")
+		if tag == "" || tag == "-" {
+			continue
+		}
+		key := tag
+		if prefix != "" {
+			key = prefix + "." + tag
+		}
+		ft := f.Type
+		if ft.Kind() == reflect.Struct && ft != reflect.TypeOf(time.Duration(0)) {
+			bindEnvs(v, ft, key)
+			continue
+		}
+		if ft.Kind() == reflect.Slice && ft.Elem().Kind() == reflect.Struct {
+			continue // lists of objects (e.g. api_keys) come from the config file
+		}
+		_ = v.BindEnv(key)
+	}
 }

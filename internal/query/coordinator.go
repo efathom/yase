@@ -19,9 +19,11 @@ type SearchRequest struct {
 
 // SearchResponse holds the fused results from a distributed search.
 type SearchResponse struct {
-	Results    []index.ScoredResult
+	Results    []Result
 	ShardCount int // number of shards that responded
 	Errors     []error
+	// Partial is true when at least one shard failed: results are incomplete.
+	Partial bool
 }
 
 // ShardSearcher is the interface for executing a search on a single shard.
@@ -80,7 +82,7 @@ func (c *Coordinator) Search(ctx context.Context, req *SearchRequest) (*SearchRe
 	}
 
 	// 4. Gather: collect results, tolerate partial failures
-	var allResults [][]index.ScoredResult
+	var allResults []ShardResults
 	var errors []error
 	for range shardIDs {
 		sr := <-resultsCh
@@ -88,7 +90,7 @@ func (c *Coordinator) Search(ctx context.Context, req *SearchRequest) (*SearchRe
 			errors = append(errors, fmt.Errorf("shard %d: %w", sr.ShardID, sr.Err))
 			continue
 		}
-		allResults = append(allResults, sr.Results)
+		allResults = append(allResults, ShardResults{ShardID: sr.ShardID, Results: sr.Results})
 	}
 
 	// Fail if ALL shards failed; partial results are acceptable
@@ -96,27 +98,28 @@ func (c *Coordinator) Search(ctx context.Context, req *SearchRequest) (*SearchRe
 		return nil, fmt.Errorf("all %d shards failed: %v", len(shardIDs), errors)
 	}
 
-	// 5. Merge: distributed RRF across shard-local ranked lists
-	fused := MergeRRF(allResults, req.TopK)
+	// 5. Merge: global ranking across shards
 	return &SearchResponse{
-		Results:    fused,
+		Results:    MergeShards(allResults, req.TopK),
 		ShardCount: len(allResults),
 		Errors:     errors,
+		Partial:    len(errors) > 0,
 	}, nil
 }
 
 // mergeFilters combines alias-embedded filters with user-supplied filters.
-// User filters take precedence.
+// Alias filters take precedence: an alias may encode an access restriction
+// (e.g. a tenant or source), which a query must never be able to override.
 func mergeFilters(aliasFilters, queryFilters map[string]string) map[string]string {
 	if len(aliasFilters) == 0 && len(queryFilters) == 0 {
 		return nil
 	}
 	merged := make(map[string]string)
-	for k, v := range aliasFilters {
+	for k, v := range queryFilters {
 		merged[k] = v
 	}
-	for k, v := range queryFilters {
-		merged[k] = v // user overrides alias
+	for k, v := range aliasFilters {
+		merged[k] = v // alias wins
 	}
 	return merged
 }

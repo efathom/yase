@@ -1,306 +1,516 @@
 package index
 
 import (
-	"bytes"
+	"bufio"
+	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
+	"hash"
 	"hash/crc32"
 	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
-	"sync"
+	"strconv"
+	"strings"
 
+	"github.com/RoaringBitmap/roaring"
 	"github.com/efathom/yase/pkg/hnsw"
 	"github.com/efathom/yase/pkg/memory"
+	"github.com/efathom/yase/pkg/vector"
 )
 
-// PersistConfig specifies paths for HybridEngine snapshot files.
-type PersistConfig struct {
-	Dir       string // directory containing graph/IF/offsets snapshot files
-	ArenaPath string // path to the file-backed arena (separate, since it's mmap'd in-place)
+// On-disk layout of a persistent engine directory:
+//
+//	<dir>/bluge/               Bluge inverted index (durable per batch)
+//	<dir>/CURRENT              name of the live generation, e.g. "gen-000003"
+//	<dir>/gen-000003/arena.bin file-backed vector arena
+//	<dir>/gen-000003/snapshot.bin
+//
+// A generation is replaced as a whole by compaction: the new generation is
+// fully written before CURRENT is atomically switched to it.
+
+const (
+	currentFile  = "CURRENT"
+	arenaFile    = "arena.bin"
+	snapshotFile = "snapshot.bin"
+	genPrefix    = "gen-"
+)
+
+var snapshotMagic = [4]byte{'Y', 'S', 'N', 'P'}
+
+const snapshotVersion uint32 = 1
+
+// EngineConfig configures a persistent HybridEngine.
+type EngineConfig struct {
+	Dir          string      // engine directory (created if missing)
+	ArenaSize    uint64      // maximum vector arena size in bytes
+	HNSW         hnsw.Config // graph hyperparameters (VecDim required)
+	CentroidRate int
 }
 
-func (pc PersistConfig) graphPath() string   { return filepath.Join(pc.Dir, "graph.bin") }
-func (pc PersistConfig) ifPath() string      { return filepath.Join(pc.Dir, "inverted_files.bin") }
-func (pc PersistConfig) offsetsPath() string { return filepath.Join(pc.Dir, "offsets.bin") }
-
-// SaveSnapshot persists the HybridEngine state to disk.
-// The arena is synced via FileArena.Sync() if file-backed, otherwise skipped.
-// Graph topology, inverted files, and vector offsets are written atomically
-// via temp files + rename.
-func (he *HybridEngine) SaveSnapshot(cfg PersistConfig) error {
-	if err := os.MkdirAll(cfg.Dir, 0o755); err != nil {
-		return fmt.Errorf("mkdir: %w", err)
-	}
-
-	// Take a full lock so no Ingest/Delete can interleave with the snapshot,
-	// guaranteeing a consistent cut across arena, graph, inverted files, and
-	// vector offsets.
-	he.lifecycleMu.Lock()
-	defer he.lifecycleMu.Unlock()
-
-	// Sync arena if file-backed
-	if fa, ok := he.Arena.(*memory.FileArena); ok {
-		if err := fa.Sync(); err != nil {
-			return fmt.Errorf("arena sync: %w", err)
-		}
-	}
-
-	// Graph topology
-	if err := writeAtomicFile(cfg.graphPath(), func(w io.Writer) error {
-		return he.Graph.Snapshot(w)
-	}); err != nil {
-		return fmt.Errorf("graph snapshot: %w", err)
-	}
-
-	// Inverted files
-	if err := writeAtomicFile(cfg.ifPath(), func(w io.Writer) error {
-		return he.snapshotInvertedFiles(w)
-	}); err != nil {
-		return fmt.Errorf("inverted files snapshot: %w", err)
-	}
-
-	// Vector offsets
-	if err := writeAtomicFile(cfg.offsetsPath(), func(w io.Writer) error {
-		return he.snapshotVectorOffsets(w)
-	}); err != nil {
-		return fmt.Errorf("vector offsets snapshot: %w", err)
-	}
-
-	return nil
+type engineStore struct {
+	dir string
+	gen int
 }
 
-// snapshotInvertedFiles writes centroid→leaf posting lists, framed with
-// magic + version + CRC32 so corruption is detected on restore.
-// Format: magic(4) + version(4) + count(4) + entries + crc32(4).
-func (he *HybridEngine) snapshotInvertedFiles(w io.Writer) error {
-	he.ifMu.RLock()
-	defer he.ifMu.RUnlock()
+func genName(g int) string { return fmt.Sprintf("%s%06d", genPrefix, g) }
 
-	var payload bytes.Buffer
-	var countBuf [4]byte
-	binary.LittleEndian.PutUint32(countBuf[:], uint32(len(he.invertedFiles)))
-	payload.Write(countBuf[:])
+func (s *engineStore) genDir(g int) string    { return filepath.Join(s.dir, genName(g)) }
+func (s *engineStore) arenaPath(g int) string { return filepath.Join(s.genDir(g), arenaFile) }
+func (s *engineStore) snapPath(g int) string  { return filepath.Join(s.genDir(g), snapshotFile) }
 
-	for centroidID, leaves := range he.invertedFiles {
-		var entry [8]byte
-		binary.LittleEndian.PutUint32(entry[0:4], centroidID)
-		binary.LittleEndian.PutUint32(entry[4:8], uint32(len(leaves)))
-		payload.Write(entry[:])
-
-		leafBuf := make([]byte, len(leaves)*4)
-		for i, leafID := range leaves {
-			binary.LittleEndian.PutUint32(leafBuf[i*4:(i+1)*4], leafID)
-		}
-		payload.Write(leafBuf)
+func (s *engineStore) readCurrent() (int, bool, error) {
+	b, err := os.ReadFile(filepath.Join(s.dir, currentFile))
+	if errors.Is(err, os.ErrNotExist) {
+		return 0, false, nil
 	}
-
-	return writeFrame(w, ifMagic, payload.Bytes())
+	if err != nil {
+		return 0, false, err
+	}
+	name := strings.TrimSpace(string(b))
+	g, err := strconv.Atoi(strings.TrimPrefix(name, genPrefix))
+	if err != nil || !strings.HasPrefix(name, genPrefix) {
+		return 0, false, fmt.Errorf("corrupt %s: %q", currentFile, name)
+	}
+	return g, true, nil
 }
 
-// snapshotVectorOffsets writes docID→arena offset pairs, framed with
-// magic + version + CRC32.
-func (he *HybridEngine) snapshotVectorOffsets(w io.Writer) error {
-	var entries []struct {
-		id     uint32
-		offset uint64
-	}
-	he.VectorOffsets.Range(func(key, value any) bool {
-		entries = append(entries, struct {
-			id     uint32
-			offset uint64
-		}{id: key.(uint32), offset: value.(uint64)})
-		return true
+func (s *engineStore) writeCurrent(g int) error {
+	return writeAtomicFile(filepath.Join(s.dir, currentFile), func(w io.Writer) error {
+		_, err := io.WriteString(w, genName(g)+"\n")
+		return err
 	})
-
-	var payload bytes.Buffer
-	var countBuf [4]byte
-	binary.LittleEndian.PutUint32(countBuf[:], uint32(len(entries)))
-	payload.Write(countBuf[:])
-
-	for _, e := range entries {
-		var entry [12]byte
-		binary.LittleEndian.PutUint32(entry[0:4], e.id)
-		binary.LittleEndian.PutUint64(entry[4:12], e.offset)
-		payload.Write(entry[:])
-	}
-
-	return writeFrame(w, offMagic, payload.Bytes())
 }
 
-// LoadHybridEngine restores a HybridEngine from a snapshot directory.
-// The arena must be a FileArena opened from the persisted arena file.
-// Bluge indexes are restored from indexPath (Bluge handles its own persistence).
-func LoadHybridEngine(cfg PersistConfig, indexPath string, vecDim int, centroidRate int) (*HybridEngine, error) {
-	// Open arena
-	arena, err := memory.OpenFileArena(cfg.ArenaPath)
+// removeStaleGenerations deletes every generation directory except keep.
+func (s *engineStore) removeStaleGenerations(keep int) {
+	entries, err := os.ReadDir(s.dir)
 	if err != nil {
-		return nil, fmt.Errorf("open arena: %w", err)
+		return
 	}
+	for _, e := range entries {
+		if e.IsDir() && strings.HasPrefix(e.Name(), genPrefix) && e.Name() != genName(keep) {
+			_ = os.RemoveAll(filepath.Join(s.dir, e.Name()))
+		}
+	}
+}
 
-	// Restore graph
-	graphFile, err := os.Open(cfg.graphPath())
-	if err != nil {
-		arena.Close()
-		return nil, fmt.Errorf("open graph: %w", err)
+// OpenHybridEngine opens (or creates) a durable engine in cfg.Dir.
+//
+// If a valid snapshot exists it is restored. Otherwise a fresh vector index is
+// created; any documents already in the Bluge index are then missing vectors,
+// which Reconcile rebuilds from their stored text. Callers should always run
+// Reconcile after opening.
+func OpenHybridEngine(cfg EngineConfig) (*HybridEngine, error) {
+	if cfg.Dir == "" {
+		return nil, errors.New("engine dir is required")
 	}
-	hnswCfg := hnsw.DefaultConfig(vecDim)
-	graph, err := hnsw.RestoreGraph(graphFile, arena, hnswCfg)
-	graphFile.Close()
-	if err != nil {
-		arena.Close()
-		return nil, fmt.Errorf("restore graph: %w", err)
+	if cfg.HNSW.VecDim <= 0 {
+		return nil, errors.New("engine vector dimension must be > 0")
 	}
+	if cfg.ArenaSize == 0 {
+		cfg.ArenaSize = 64 << 30
+	}
+	if err := os.MkdirAll(cfg.Dir, 0o755); err != nil {
+		return nil, fmt.Errorf("mkdir: %w", err)
+	}
+	store := &engineStore{dir: cfg.Dir}
+	hnswCfg := engineGraphConfig(cfg.HNSW)
 
-	// Open Bluge (it persists its own state)
-	bs, err := NewBlugeStore(indexPath)
+	bs, err := NewBlugeStore(filepath.Join(cfg.Dir, "bluge"))
 	if err != nil {
-		arena.Close()
 		return nil, fmt.Errorf("bluge store: %w", err)
 	}
 
-	he := &HybridEngine{
-		BlugeStore:    bs,
-		Arena:         arena,
-		Graph:         graph,
-		invertedFiles: make(map[uint32][]uint32),
-		VecDim:        vecDim,
-		CentroidRate:  centroidRate,
-		EfSearch:      graph.EfSearch(),
-	}
-
-	// Restore inverted files
-	ifFile, err := os.Open(cfg.ifPath())
+	gen, ok, err := store.readCurrent()
 	if err != nil {
-		he.Close()
-		return nil, fmt.Errorf("open inverted files: %w", err)
+		bs.Close()
+		return nil, err
 	}
-	if err := he.restoreInvertedFiles(ifFile); err != nil {
-		ifFile.Close()
-		he.Close()
-		return nil, fmt.Errorf("restore inverted files: %w", err)
+	if ok {
+		he, lerr := loadGeneration(store, gen, bs, hnswCfg, cfg)
+		if lerr == nil {
+			store.removeStaleGenerations(gen)
+			return he, nil
+		}
+		if !errors.Is(lerr, os.ErrNotExist) {
+			slog.Error("engine snapshot unusable; rebuilding vectors from the text index",
+				"dir", cfg.Dir, "generation", gen, "error", lerr)
+		}
 	}
-	ifFile.Close()
 
-	// Restore vector offsets
-	offsetsFile, err := os.Open(cfg.offsetsPath())
+	// Fresh generation.
+	gen++
+	store.gen = gen
+	if err := os.MkdirAll(store.genDir(gen), 0o755); err != nil {
+		bs.Close()
+		return nil, fmt.Errorf("mkdir generation: %w", err)
+	}
+	arena, err := memory.NewFileArena(store.arenaPath(gen), cfg.ArenaSize)
 	if err != nil {
-		he.Close()
-		return nil, fmt.Errorf("open offsets: %w", err)
+		bs.Close()
+		return nil, fmt.Errorf("arena: %w", err)
 	}
-	if err := he.restoreVectorOffsets(offsetsFile); err != nil {
-		offsetsFile.Close()
+	he := newEngine(bs, arena, hnsw.NewGraph(arena, hnswCfg), hnswCfg, cfg.CentroidRate)
+	he.store = store
+	he.arenaCap = cfg.ArenaSize
+	if err := he.Checkpoint(); err != nil {
 		he.Close()
-		return nil, fmt.Errorf("restore offsets: %w", err)
+		return nil, fmt.Errorf("initial snapshot: %w", err)
 	}
-	offsetsFile.Close()
-
+	if err := store.writeCurrent(gen); err != nil {
+		he.Close()
+		return nil, fmt.Errorf("write %s: %w", currentFile, err)
+	}
+	store.removeStaleGenerations(gen)
 	return he, nil
 }
 
-func (he *HybridEngine) restoreInvertedFiles(r io.Reader) error {
-	payload, err := readFrame(r, ifMagic)
+func loadGeneration(store *engineStore, gen int, bs *BlugeStore, hnswCfg hnsw.Config, cfg EngineConfig) (*HybridEngine, error) {
+	if _, err := os.Stat(store.snapPath(gen)); err != nil {
+		return nil, err
+	}
+	arena, err := memory.OpenFileArena(store.arenaPath(gen))
 	if err != nil {
-		return err
+		return nil, fmt.Errorf("open arena: %w", err)
 	}
-	if len(payload) < 4 {
-		return fmt.Errorf("inverted files snapshot truncated")
+	he := newEngine(bs, arena, nil, hnswCfg, cfg.CentroidRate)
+	he.store = &engineStore{dir: store.dir, gen: gen}
+	he.arenaCap = cfg.ArenaSize
+	if err := he.readSnapshot(store.snapPath(gen), hnswCfg); err != nil {
+		arena.Close()
+		return nil, err
 	}
-	count := int(binary.LittleEndian.Uint32(payload[0:4]))
-	pos := 4
-
-	he.ifMu.Lock()
-	defer he.ifMu.Unlock()
-
-	for i := 0; i < count; i++ {
-		if pos+8 > len(payload) {
-			return fmt.Errorf("inverted files snapshot truncated at entry %d", i)
-		}
-		centroidID := binary.LittleEndian.Uint32(payload[pos : pos+4])
-		leafCount := int(binary.LittleEndian.Uint32(payload[pos+4 : pos+8]))
-		pos += 8
-
-		// Bounds-check before allocating to avoid OOM on corrupt files.
-		if leafCount < 0 || leafCount > (len(payload)-pos)/4 {
-			return fmt.Errorf("inverted files snapshot: corrupt leafCount %d", leafCount)
-		}
-
-		leaves := make([]uint32, leafCount)
-		for j := 0; j < leafCount; j++ {
-			leaves[j] = binary.LittleEndian.Uint32(payload[pos+j*4 : pos+(j+1)*4])
-		}
-		pos += leafCount * 4
-		he.invertedFiles[centroidID] = leaves
-	}
-	return nil
+	*store = *he.store
+	return he, nil
 }
 
-func (he *HybridEngine) restoreVectorOffsets(r io.Reader) error {
-	payload, err := readFrame(r, offMagic)
-	if err != nil {
+// Checkpoint durably persists the vector index. It blocks writers (not
+// searches) for the duration. A no-op for in-memory engines.
+func (he *HybridEngine) Checkpoint() error {
+	if he.store == nil {
+		return nil
+	}
+	he.writeMu.Lock()
+	defer he.writeMu.Unlock()
+	if err := he.acquire(); err != nil {
 		return err
 	}
-	if len(payload) < 4 {
-		return fmt.Errorf("offsets snapshot truncated")
-	}
-	count := int(binary.LittleEndian.Uint32(payload[0:4]))
-	pos := 4
-
-	for i := 0; i < count; i++ {
-		if pos+12 > len(payload) {
-			return fmt.Errorf("offsets snapshot truncated at entry %d", i)
-		}
-		docID := binary.LittleEndian.Uint32(payload[pos : pos+4])
-		offset := binary.LittleEndian.Uint64(payload[pos+4 : pos+12])
-		pos += 12
-		he.VectorOffsets.Store(docID, offset)
-	}
-	return nil
+	defer he.release()
+	return he.checkpointLocked(he.store.gen)
 }
 
-// Snapshot framing: magic(4) + version(4) + payload + crc32(4).
-const snapshotVersion = 1
+// checkpointLocked writes the snapshot for generation g. Callers hold writeMu.
+func (he *HybridEngine) checkpointLocked(g int) error {
+	fa, ok := he.Arena.(*memory.FileArena)
+	if !ok {
+		return errors.New("persistent engine requires a file-backed arena")
+	}
+	if err := fa.Sync(); err != nil {
+		return fmt.Errorf("arena sync: %w", err)
+	}
+	return writeAtomicFile(he.store.snapPath(g), he.writeSnapshot)
+}
 
-const (
-	ifMagic  = "YSIF" // inverted files
-	offMagic = "YSOF" // vector offsets
-)
+// SaveSnapshot is retained for callers of the earlier API; it is Checkpoint.
+func (he *HybridEngine) SaveSnapshot() error { return he.Checkpoint() }
 
-func writeFrame(w io.Writer, magic string, payload []byte) error {
-	var buf bytes.Buffer
-	buf.WriteString(magic)
-	var ver [4]byte
-	binary.LittleEndian.PutUint32(ver[:], snapshotVersion)
-	buf.Write(ver[:])
-	buf.Write(payload)
+// IsPersistent reports whether the engine is backed by durable storage.
+func (he *HybridEngine) IsPersistent() bool { return he.store != nil }
 
-	var crc [4]byte
-	binary.LittleEndian.PutUint32(crc[:], crc32.ChecksumIEEE(buf.Bytes()))
-	buf.Write(crc[:])
+// writeSnapshot streams the vector-index state with a trailing CRC32.
+func (he *HybridEngine) writeSnapshot(out io.Writer) error {
+	crc := crc32.NewIEEE()
+	w := io.MultiWriter(out, crc)
 
-	_, err := w.Write(buf.Bytes())
+	hdr := make([]byte, 4+4+4+4+8+8)
+	copy(hdr[0:4], snapshotMagic[:])
+	binary.LittleEndian.PutUint32(hdr[4:8], snapshotVersion)
+	binary.LittleEndian.PutUint32(hdr[8:12], uint32(he.VecDim))
+	binary.LittleEndian.PutUint32(hdr[12:16], uint32(he.CentroidRate))
+	binary.LittleEndian.PutUint64(hdr[16:24], he.nextID.Load())
+	binary.LittleEndian.PutUint64(hdr[24:32], he.deadBytes.Load())
+	if _, err := w.Write(hdr); err != nil {
+		return err
+	}
+	if err := he.Graph.Snapshot(w); err != nil {
+		return fmt.Errorf("graph: %w", err)
+	}
+
+	he.ifMu.RLock()
+	defer he.ifMu.RUnlock()
+
+	var b4 [4]byte
+	var b12 [12]byte
+	binary.LittleEndian.PutUint32(b4[:], uint32(len(he.invertedFiles)))
+	if _, err := w.Write(b4[:]); err != nil {
+		return err
+	}
+	for c, leaves := range he.invertedFiles {
+		var e [8]byte
+		binary.LittleEndian.PutUint32(e[0:4], c)
+		binary.LittleEndian.PutUint32(e[4:8], uint32(len(leaves)))
+		if _, err := w.Write(e[:]); err != nil {
+			return err
+		}
+		for _, l := range leaves {
+			binary.LittleEndian.PutUint32(b4[:], l)
+			if _, err := w.Write(b4[:]); err != nil {
+				return err
+			}
+		}
+	}
+
+	binary.LittleEndian.PutUint32(b4[:], uint32(len(he.offsets)))
+	if _, err := w.Write(b4[:]); err != nil {
+		return err
+	}
+	for id, off := range he.offsets {
+		binary.LittleEndian.PutUint32(b12[0:4], id)
+		binary.LittleEndian.PutUint64(b12[4:12], off)
+		if _, err := w.Write(b12[:]); err != nil {
+			return err
+		}
+	}
+
+	binary.LittleEndian.PutUint32(b4[:], crc.Sum32())
+	_, err := out.Write(b4[:])
 	return err
 }
 
-func readFrame(r io.Reader, magic string) ([]byte, error) {
-	data, err := io.ReadAll(r)
+// crcReader tees everything read through a CRC.
+type crcReader struct {
+	r   io.Reader
+	crc hash.Hash32
+}
+
+func (c *crcReader) Read(p []byte) (int, error) {
+	n, err := c.r.Read(p)
+	c.crc.Write(p[:n])
+	return n, err
+}
+
+func (he *HybridEngine) readSnapshot(path string, hnswCfg hnsw.Config) error {
+	f, err := os.Open(path)
 	if err != nil {
-		return nil, err
+		return err
 	}
-	if len(data) < 12 {
-		return nil, fmt.Errorf("snapshot too short")
+	defer f.Close()
+	br := bufio.NewReaderSize(f, 1<<20)
+	r := &crcReader{r: br, crc: crc32.NewIEEE()}
+
+	hdr := make([]byte, 32)
+	if _, err := io.ReadFull(r, hdr); err != nil {
+		return fmt.Errorf("read header: %w", err)
 	}
-	if string(data[0:4]) != magic {
-		return nil, fmt.Errorf("bad snapshot magic %q", string(data[0:4]))
+	if [4]byte(hdr[0:4]) != snapshotMagic {
+		return fmt.Errorf("bad snapshot magic %q", hdr[0:4])
 	}
-	if v := binary.LittleEndian.Uint32(data[4:8]); v != snapshotVersion {
-		return nil, fmt.Errorf("unsupported snapshot version %d", v)
+	if v := binary.LittleEndian.Uint32(hdr[4:8]); v != snapshotVersion {
+		return fmt.Errorf("unsupported snapshot version %d", v)
 	}
-	want := binary.LittleEndian.Uint32(data[len(data)-4:])
-	if crc32.ChecksumIEEE(data[:len(data)-4]) != want {
-		return nil, fmt.Errorf("snapshot checksum mismatch")
+	if dim := int(binary.LittleEndian.Uint32(hdr[8:12])); dim != he.VecDim {
+		return fmt.Errorf("snapshot vecDim %d != configured %d", dim, he.VecDim)
 	}
-	return data[8 : len(data)-4], nil
+	nextID := binary.LittleEndian.Uint64(hdr[16:24])
+	dead := binary.LittleEndian.Uint64(hdr[24:32])
+
+	g, err := hnsw.RestoreGraph(r, he.Arena, hnswCfg)
+	if err != nil {
+		return fmt.Errorf("restore graph: %w", err)
+	}
+
+	used := he.Arena.UsedBytes()
+	vecBytes := uint64(he.VecDim * 4)
+	readU32 := func() (uint32, error) {
+		var b [4]byte
+		if _, err := io.ReadFull(r, b[:]); err != nil {
+			return 0, err
+		}
+		return binary.LittleEndian.Uint32(b[:]), nil
+	}
+
+	nIF, err := readU32()
+	if err != nil {
+		return fmt.Errorf("read inverted files: %w", err)
+	}
+	inv := make(map[uint32][]uint32)
+	leafOf := make(map[uint32]uint32)
+	for i := uint32(0); i < nIF; i++ {
+		c, err1 := readU32()
+		n, err2 := readU32()
+		if err := errors.Join(err1, err2); err != nil {
+			return fmt.Errorf("read inverted file %d: %w", i, err)
+		}
+		if n > 1<<28 {
+			return fmt.Errorf("corrupt inverted file %d: %d leaves", c, n)
+		}
+		leaves := make([]uint32, 0, n)
+		for j := uint32(0); j < n; j++ {
+			l, err := readU32()
+			if err != nil {
+				return fmt.Errorf("read leaf: %w", err)
+			}
+			leaves = append(leaves, l)
+			leafOf[l] = c
+		}
+		inv[c] = leaves
+	}
+
+	nOff, err := readU32()
+	if err != nil {
+		return fmt.Errorf("read offsets: %w", err)
+	}
+	offsets := make(map[uint32]uint64, nOff)
+	for i := uint32(0); i < nOff; i++ {
+		var b [12]byte
+		if _, err := io.ReadFull(r, b[:]); err != nil {
+			return fmt.Errorf("read offset %d: %w", i, err)
+		}
+		off := binary.LittleEndian.Uint64(b[4:12])
+		if off+vecBytes > used {
+			return fmt.Errorf("corrupt snapshot: offset %d beyond arena watermark %d", off, used)
+		}
+		offsets[binary.LittleEndian.Uint32(b[0:4])] = off
+	}
+
+	want := r.crc.Sum32()
+	var tail [4]byte
+	if _, err := io.ReadFull(br, tail[:]); err != nil {
+		return fmt.Errorf("read checksum: %w", err)
+	}
+	if binary.LittleEndian.Uint32(tail[:]) != want {
+		return errors.New("snapshot checksum mismatch")
+	}
+
+	he.Graph = g
+	he.EfSearch = g.EfSearch()
+	he.hnswCfg = g.Config()
+	he.invertedFiles = inv
+	he.leafCentroid = leafOf
+	he.offsets = offsets
+	he.nextID.Store(nextID)
+	he.deadBytes.Store(dead)
+	return nil
+}
+
+// ReconcileStats summarizes a Reconcile pass.
+type ReconcileStats struct {
+	Documents      int // documents in the text index
+	ReEmbedded     int // documents whose missing vectors were rebuilt
+	MissingVectors int // documents still without a vector (no embedder given or embed failed)
+	DroppedVectors int // vectors whose document no longer exists
+}
+
+// EmbedBatchFunc embeds texts, returning one vector per text.
+type EmbedBatchFunc func(ctx context.Context, texts []string) ([][]float32, error)
+
+// Reconcile makes the vector index agree with the (durable) text index:
+// vectors of documents that are gone are dropped, and documents that have no
+// vector — written after the last checkpoint before a crash, or from before
+// persistence was enabled — are re-embedded from their stored text. It also
+// advances the ID allocator past every existing document.
+func (he *HybridEngine) Reconcile(ctx context.Context, embed EmbedBatchFunc, batchSize int) (ReconcileStats, error) {
+	var st ReconcileStats
+	he.writeMu.Lock()
+	defer he.writeMu.Unlock()
+	if err := he.acquire(); err != nil {
+		return st, err
+	}
+	defer he.release()
+	if batchSize <= 0 {
+		batchSize = 64
+	}
+
+	present := roaring.New()
+	type pending struct {
+		id   uint32
+		text string
+	}
+	var batch []pending
+	flush := func() error {
+		if len(batch) == 0 {
+			return nil
+		}
+		texts := make([]string, len(batch))
+		for i, p := range batch {
+			texts[i] = p.text
+		}
+		vecs, err := embed(ctx, texts)
+		if err != nil || len(vecs) != len(batch) {
+			st.MissingVectors += len(batch)
+			slog.Warn("reconcile: embedding failed", "docs", len(batch), "error", err)
+			batch = batch[:0]
+			return nil
+		}
+		for i, p := range batch {
+			if len(vecs[i]) != he.VecDim {
+				st.MissingVectors++
+				continue
+			}
+			if err := he.restoreVector(p.id, vecs[i]); err != nil {
+				return err
+			}
+			st.ReEmbedded++
+		}
+		batch = batch[:0]
+		return nil
+	}
+
+	err := he.BlugeStore.ForEach(ctx, nil, true, func(h SearchHit) error {
+		id, ok := parseDocID(h.ID)
+		if !ok {
+			return nil
+		}
+		st.Documents++
+		present.Add(id)
+		he.observeID(id)
+		if _, has := he.VectorOffset(id); has {
+			return nil
+		}
+		if embed == nil {
+			st.MissingVectors++
+			return nil
+		}
+		batch = append(batch, pending{id: id, text: h.Content})
+		if len(batch) >= batchSize {
+			return flush()
+		}
+		return nil
+	})
+	if err == nil {
+		err = flush()
+	}
+	if err != nil {
+		return st, err
+	}
+
+	var drop []uint32
+	he.ifMu.RLock()
+	for id := range he.offsets {
+		if !present.Contains(id) {
+			drop = append(drop, id)
+		}
+	}
+	he.ifMu.RUnlock()
+	st.DroppedVectors = he.removeVectors(drop)
+	if st.ReEmbedded > 0 || st.DroppedVectors > 0 {
+		he.gen.Add(1)
+	}
+	return st, nil
+}
+
+// restoreVector inserts a vector for a document already in the text index.
+func (he *HybridEngine) restoreVector(id uint32, vec []float32) error {
+	nv := vector.Normalized(vec)
+	off, err := he.Arena.AllocFloat32(nv)
+	if err != nil {
+		return fmt.Errorf("arena alloc: %w", err)
+	}
+	isCentroid := id%uint32(he.CentroidRate) == 0 || he.Graph.Len() == 0
+	return he.insertVector(id, nv, off, isCentroid)
 }
 
 // writeAtomicFile writes via a temp file then renames for crash safety,
@@ -311,57 +521,33 @@ func writeAtomicFile(path string, writeFn func(w io.Writer) error) error {
 	if err != nil {
 		return err
 	}
-
-	if err := writeFn(f); err != nil {
+	bw := bufio.NewWriterSize(f, 1<<20)
+	if err := writeFn(bw); err != nil {
 		f.Close()
 		_ = os.Remove(tmpPath)
 		return err
 	}
-
+	if err := bw.Flush(); err != nil {
+		f.Close()
+		_ = os.Remove(tmpPath)
+		return err
+	}
 	if err := f.Sync(); err != nil {
 		f.Close()
 		_ = os.Remove(tmpPath)
 		return err
 	}
-	f.Close()
-
+	if err := f.Close(); err != nil {
+		_ = os.Remove(tmpPath)
+		return err
+	}
 	if err := os.Rename(tmpPath, path); err != nil {
 		_ = os.Remove(tmpPath)
 		return err
 	}
-
-	// Fsync the directory so the rename itself is durable.
 	if dir, err := os.Open(filepath.Dir(path)); err == nil {
 		_ = dir.Sync()
 		dir.Close()
 	}
 	return nil
-}
-
-// NewHybridEngineWithArena creates a HybridEngine using a provided arena
-// (either OffHeapArena or FileArena).
-func NewHybridEngineWithArena(indexPath string, arena memory.Arena, vecDim int, centroidRate int) (*HybridEngine, error) {
-	return NewHybridEngineWithArenaConfig(indexPath, arena, hnsw.DefaultConfig(vecDim), centroidRate)
-}
-
-// NewHybridEngineWithArenaConfig creates a HybridEngine using a provided arena
-// and custom HNSW hyperparameters.
-func NewHybridEngineWithArenaConfig(indexPath string, arena memory.Arena, hnswCfg hnsw.Config, centroidRate int) (*HybridEngine, error) {
-	bs, err := NewBlugeStore(indexPath)
-	if err != nil {
-		return nil, fmt.Errorf("bluge store: %w", err)
-	}
-
-	graph := hnsw.NewGraph(arena, hnswCfg)
-
-	return &HybridEngine{
-		BlugeStore:    bs,
-		Arena:         arena,
-		Graph:         graph,
-		invertedFiles: make(map[uint32][]uint32),
-		VecDim:        hnswCfg.VecDim,
-		CentroidRate:  centroidRate,
-		EfSearch:      hnswCfg.EfSearch,
-		ifMu:          sync.RWMutex{},
-	}, nil
 }

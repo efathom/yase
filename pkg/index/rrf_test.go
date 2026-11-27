@@ -103,3 +103,37 @@ func abs(x float64) float64 {
 	}
 	return x
 }
+
+func TestRRFNonLexicalMatchesGetNoLexicalRank(t *testing.T) {
+	tests := []struct {
+		name    string
+		in      []ScoredResult
+		wantTop uint32
+	}{
+		{
+			// b and c share the same semantic rank pattern; only a matched
+			// the text. Before the fix, c (BM25=0) still received a lexical
+			// rank and could outscore a semantically better document.
+			name: "zero-BM25 docs get no lexical contribution",
+			in: []ScoredResult{
+				{ID: 1, BM25Score: 0, SemanticScore: 0.9},
+				{ID: 2, BM25Score: 0, SemanticScore: 0.8},
+				{ID: 3, BM25Score: 5, SemanticScore: 0.1},
+			},
+			wantTop: 3,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			out := ReciprocalRankFusion(tt.in, 3)
+			if out[0].ID != tt.wantTop {
+				t.Fatalf("top = %d, want %d", out[0].ID, tt.wantTop)
+			}
+			for _, r := range out {
+				if r.ID == 2 && r.FusedScore != 1.0/(60+2) {
+					t.Errorf("doc 2 fused %v, want pure semantic rank score", r.FusedScore)
+				}
+			}
+		})
+	}
+}

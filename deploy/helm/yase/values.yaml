@@ -25,7 +25,10 @@ gateway:
 
 indexer:
   port: 50052
-  arenaSize: "4Gi"
+  healthPort: 8090
+  # Upper bound for each vector arena in bytes (arenas grow on demand).
+  arenaSize: "68719476736" # 64 GiB
+  terminationGracePeriodSeconds: 120 # time for the final checkpoint
   persistence:
     enabled: true
     size: 50Gi
@@ -75,17 +78,31 @@ embedder:
 
 collections:
   basePath: /data/yase/collections
-  defaultArena: "1Gi"
+  defaultArena: "68719476736" # bytes, per-collection upper bound
+  # Hosts a collection may point its own embedder base_url at (SSRF guard).
+  allowedEmbedderHosts: []
   maxCollections: 100
 
 auth:
   enabled: false
-  method: api_key
+  method: jwt # api_key keys must be supplied via a config file
+  jwt:
+    issuer: ""
+    audience: ""
+    jwksUrl: "" # e.g. https://idp.example.com/.well-known/jwks.json
+    requireTenant: true
+
+rateLimit:
+  enabled: false
+  backend: redis # shared across gateway replicas
+  searchQps: 100
 
 kafka:
   brokers:
     - kafka:9092
+  # Use a log-compacted topic keyed by URL so the index can be rebuilt from it.
   topic: crawl-records
+  dlqTopic: crawl-records-dlq
 
 redis:
   addr: redis:6379
@@ -101,6 +118,28 @@ serviceAccount:
 secrets:
   embedderApiKey: ""
   jwtSecret: ""
+  # Token the gateway presents to the indexer's gRPC services. The indexer
+  # accepts it as an admin service identity (see auth.api_keys).
+  internalToken: ""
+
+server:
+  # CIDRs of load balancers / ingress whose X-Forwarded-For is trusted.
+  trustedProxies: []
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 10001
+  runAsGroup: 10001
+  fsGroup: 10001
+  seccompProfile:
+    type: RuntimeDefault
+
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: ["ALL"]
 
 networkPolicy:
-  enabled: false
+  # Only gateway pods may reach the indexer's gRPC port.
+  enabled: true

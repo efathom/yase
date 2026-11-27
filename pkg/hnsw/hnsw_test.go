@@ -284,8 +284,7 @@ func TestEdgePruningRespectsMmax(t *testing.T) {
 	}
 
 	// Verify no node exceeds Mmax0 edges at layer 0
-	g.mu.RLock()
-	for id, node := range g.nodes {
+	g.nodes.forEach(func(id uint32, node *Node) {
 		edges := node.GetEdges(0)
 		if len(edges) > cfg.Mmax0 {
 			t.Errorf("node %d has %d edges at layer 0, max allowed is %d", id, len(edges), cfg.Mmax0)
@@ -297,8 +296,7 @@ func TestEdgePruningRespectsMmax(t *testing.T) {
 				t.Errorf("node %d has %d edges at layer %d, max allowed is %d", id, len(e), l, cfg.M)
 			}
 		}
-	}
-	g.mu.RUnlock()
+	})
 }
 
 func TestSelectNeighborsHeuristic(t *testing.T) {

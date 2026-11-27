@@ -145,6 +145,28 @@ func (cs *ClusterState) Apply(log *raft.Log) interface{} {
 			}
 		}
 
+	case CmdAddReplica:
+		ar := cmd.AddReplica
+		shard, ok := cs.Shards[ar.ShardID]
+		if !ok {
+			shard = &ShardInfo{ID: ar.ShardID, State: ShardReady}
+			cs.Shards[ar.ShardID] = shard
+		}
+		present := false
+		for _, r := range shard.Replicas {
+			if r == ar.NodeID {
+				present = true
+				break
+			}
+		}
+		if !present {
+			shard.Replicas = append(shard.Replicas, ar.NodeID)
+			shard.Version++
+		}
+		if node, ok := cs.Nodes[ar.NodeID]; ok && !containsUint32(node.Shards, ar.ShardID) {
+			node.Shards = append(node.Shards, ar.ShardID)
+		}
+
 	case CmdUpdateAlias:
 		a := cmd.UpdateAlias
 		cs.Aliases[a.Name] = &AliasInfo{

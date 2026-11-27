@@ -59,6 +59,20 @@ func validateCrawlerMaster(c *Config, errs *[]error) {
 	}
 }
 
+// validateClusterAPI requires a join token whenever the cluster management
+// API (join/leave/shard assignment) listens beyond loopback.
+func validateClusterAPI(c *Config, errs *[]error) {
+	if c.Cluster.HTTPAddr == "" || isLoopbackListenAddr(c.Cluster.HTTPAddr) {
+		return
+	}
+	const minTokenLen = 16
+	if len(c.Cluster.JoinToken) < minTokenLen {
+		*errs = append(*errs, fmt.Errorf(
+			"cluster.join_token: at least %d characters required when cluster.http_addr (%q) is not loopback",
+			minTokenLen, c.Cluster.HTTPAddr))
+	}
+}
+
 // Validate checks the configuration for invalid or missing values.
 // Returns an error describing all validation failures.
 func (c *Config) Validate() error {
@@ -150,8 +164,8 @@ func (c *Config) Validate() error {
 				errs = append(errs, fmt.Errorf("auth.api_keys: at least one API key required when method=api_key"))
 			}
 		case "jwt":
-			if c.Auth.JWT.Secret == "" {
-				errs = append(errs, fmt.Errorf("auth.jwt.secret: required when method=jwt"))
+			if c.Auth.JWT.Secret == "" && c.Auth.JWT.PublicKeyPath == "" && c.Auth.JWT.JWKSURL == "" {
+				errs = append(errs, fmt.Errorf("auth.jwt: one of secret, public_key_path or jwks_url is required when method=jwt"))
 			}
 		case "none", "":
 			// ok
@@ -180,6 +194,22 @@ func (c *Config) Validate() error {
 
 	// Cluster
 	validatePort("cluster.shard_port", c.Cluster.ShardPort, &errs)
+	validateClusterAPI(c, &errs)
+
+	if b := c.RateLimit.Backend; b != "" && b != "memory" && b != "redis" {
+		errs = append(errs, fmt.Errorf("rate_limit.backend: must be memory or redis, got %q", b))
+	}
+
+	// Index maintenance
+	if c.Index.CompactDeadRatio < 0 || c.Index.CompactDeadRatio > 1 {
+		errs = append(errs, fmt.Errorf("index.compact_dead_ratio: must be within [0, 1], got %v", c.Index.CompactDeadRatio))
+	}
+	if c.Index.DefaultTTL < 0 {
+		errs = append(errs, fmt.Errorf("index.default_ttl: must be >= 0"))
+	}
+	if c.Kafka.Workers < 0 || c.Kafka.MaxAttempts < 0 {
+		errs = append(errs, fmt.Errorf("kafka.workers / kafka.max_attempts: must be >= 0"))
+	}
 
 	// Connectors
 	if c.Connectors.HTTPPort != 0 {

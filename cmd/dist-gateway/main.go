@@ -19,6 +19,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/efathom/yase/internal/app"
+	"github.com/efathom/yase/internal/gateway"
 	"github.com/efathom/yase/internal/query"
 	"github.com/efathom/yase/internal/shard"
 	"github.com/efathom/yase/pkg/auth"
@@ -77,14 +79,16 @@ func main() {
 	defer searcher.Close()
 
 	// Topology sync — polls cluster node for shard→node mapping
-	topoSync := shard.NewTopologySync(*clusterHTTP, searcher, 2*time.Second)
+	topoSync := shard.NewTopologySync(*clusterHTTP, searcher, 2*time.Second).SetToken(cfg.Cluster.JoinToken)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go topoSync.Start(ctx)
 
-	// Wait for initial topology sync
-	time.Sleep(500 * time.Millisecond)
+	// Wait (bounded) for the first topology sync before serving.
+	for deadline := time.Now().Add(10 * time.Second); topoSync.Version() == 0 && time.Now().Before(deadline); {
+		time.Sleep(100 * time.Millisecond)
+	}
 	slog.Info("Initial topology version", "version", topoSync.Version())
 
 	// Coordinator
@@ -102,6 +106,13 @@ func main() {
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, 200, map[string]string{"status": "ok"})
 	})
+	mux.HandleFunc("GET /ready", func(w http.ResponseWriter, _ *http.Request) {
+		if topoSync.Version() == 0 {
+			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"status": "not_ready", "reason": "no topology"})
+			return
+		}
+		writeJSON(w, 200, map[string]string{"status": "ready"})
+	})
 	mux.HandleFunc("GET /topology", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, 200, map[string]any{
 			"cluster_http": *clusterHTTP,
@@ -109,15 +120,29 @@ func main() {
 		})
 	})
 
-	addr := fmt.Sprintf(":%d", cfg.Server.HTTPPort)
-	server := &http.Server{
-		Addr: addr, Handler: mux,
-		ReadTimeout: 15 * time.Second, WriteTimeout: 30 * time.Second,
+	opts := gateway.ChainOptions{
+		BodyLimit:   1 << 20,
+		LoadShedder: auth.NewLoadShedder(200),
+		RateScope:   "search",
+	}
+	if cfg.Auth.Enabled {
+		authn, err := auth.NewFromConfig(cfg.Auth)
+		if err != nil {
+			slog.Error("Failed to build authenticator", "error", err)
+			os.Exit(1)
+		}
+		opts.Authenticator = authn
+	}
+	if rl := app.RateLimiter(cfg); rl != nil {
+		opts.RateLimiter = rl
 	}
 
+	addr := fmt.Sprintf(":%d", cfg.Server.HTTPPort)
+	server := app.NewHTTPServer(addr, gateway.Chain(mux, opts))
+
 	go func() {
-		slog.Info("Distributed gateway", "addr", addr, "cluster", *clusterHTTP)
-		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		slog.Info("Distributed gateway", "addr", addr, "cluster", *clusterHTTP, "tls", cfg.TLS.Enabled)
+		if err := app.ListenAndServe(server, cfg.TLS); err != nil {
 			slog.Error("HTTP", "error", err)
 			os.Exit(1)
 		}
@@ -150,8 +175,8 @@ func handleSearch(w http.ResponseWriter, r *http.Request, coord *query.Coordinat
 		writeJSON(w, 400, map[string]string{"error": "invalid JSON"})
 		return
 	}
-	if req.Query == "" {
-		writeJSON(w, 400, map[string]string{"error": "query required"})
+	if req.Query == "" || len(req.Query) > 4096 {
+		writeJSON(w, 400, map[string]string{"error": "query required (max 4096 bytes)"})
 		return
 	}
 	if req.Alias == "" {
@@ -160,6 +185,11 @@ func handleSearch(w http.ResponseWriter, r *http.Request, coord *query.Coordinat
 	if req.TopK <= 0 {
 		req.TopK = 10
 	}
+	if req.TopK > 1000 {
+		req.TopK = 1000
+	}
+	// Tenant scoping is injected server-side and cannot be overridden.
+	req.Filters = auth.InjectTenantFilter(auth.FromContext(r.Context()), req.Filters)
 
 	queryVec, err := emb.Embed(r.Context(), req.Query)
 	if err != nil {
@@ -172,8 +202,12 @@ func handleSearch(w http.ResponseWriter, r *http.Request, coord *query.Coordinat
 		Filters: req.Filters, TopK: req.TopK,
 	})
 	if err != nil {
-		writeJSON(w, 500, map[string]string{"error": err.Error()})
+		slog.Error("distributed search failed", "error", err)
+		writeJSON(w, 503, map[string]string{"error": "search unavailable"})
 		return
+	}
+	for _, e := range resp.Errors {
+		slog.Warn("distributed search: shard failed", "error", e)
 	}
 
 	elapsed := time.Since(start)
@@ -182,7 +216,7 @@ func handleSearch(w http.ResponseWriter, r *http.Request, coord *query.Coordinat
 	results := make([]map[string]any, len(resp.Results))
 	for i, r := range resp.Results {
 		results[i] = map[string]any{
-			"id": r.ID, "fused_score": r.FusedScore,
+			"id": r.ID, "shard_id": r.ShardID, "fused_score": r.FusedScore,
 			"bm25_score": r.BM25Score, "semantic_score": r.SemanticScore,
 		}
 	}
@@ -190,6 +224,7 @@ func handleSearch(w http.ResponseWriter, r *http.Request, coord *query.Coordinat
 	writeJSON(w, 200, map[string]any{
 		"status": "success", "count": len(resp.Results),
 		"duration_ms": elapsed.Milliseconds(), "shards": resp.ShardCount,
+		"partial": resp.Partial, "failed_shards": len(resp.Errors),
 		"results": results,
 	})
 }

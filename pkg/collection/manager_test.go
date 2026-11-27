@@ -4,6 +4,8 @@ import (
 	"context"
 	"testing"
 
+	"github.com/efathom/yase/pkg/index"
+
 	"github.com/efathom/yase/pkg/config"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -301,4 +303,76 @@ func TestDelete_NotFound(t *testing.T) {
 	err := m.Delete(ctx, "", "nonexistent")
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "not found")
+}
+
+func TestCreateRejectsUnlistedEmbedderHost(t *testing.T) {
+	tests := []struct {
+		name    string
+		allowed []string
+		baseURL string
+		wantErr bool
+	}{
+		{"no override is fine", nil, "", false},
+		{"metadata endpoint rejected by default", nil, "http://169.254.169.254/latest", true},
+		{"non-http scheme rejected", []string{"tei"}, "file:///etc/passwd", true},
+		{"allowlisted host accepted", []string{"tei.internal:8888"}, "http://tei.internal:8888", false},
+		{"allowlisted hostname accepted", []string{"tei.internal"}, "http://tei.internal:8888", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			store, err := NewFileStore(dir)
+			require.NoError(t, err)
+			cfg := testConfig()
+			cfg.Collections.AllowedEmbedderHosts = tt.allowed
+			m := NewManager(store, dir, cfg, nil)
+			t.Cleanup(func() { m.Close() })
+
+			var ref *EmbedderRef
+			if tt.baseURL != "" {
+				ref = &EmbedderRef{Provider: "mock", BaseURL: tt.baseURL, Dimension: 8}
+			}
+			_, err = m.Create(context.Background(), "", "c1", "c1", CollectionConfig{Embedder: ref})
+			if tt.wantErr {
+				assert.ErrorIs(t, err, ErrInvalidConfig)
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
+}
+
+func TestRedactedMasksAPIKey(t *testing.T) {
+	c := &Collection{ID: "x", Config: CollectionConfig{Embedder: &EmbedderRef{APIKey: "sk-secret"}}}
+	r := c.Redacted()
+	assert.Equal(t, "***", r.Config.Embedder.APIKey)
+	assert.Equal(t, "sk-secret", c.Config.Embedder.APIKey, "original untouched")
+}
+
+func TestCollectionsSurviveRestart(t *testing.T) {
+	dir := t.TempDir()
+	store, err := NewFileStore(dir)
+	require.NoError(t, err)
+	ctx := context.Background()
+
+	m := NewManager(store, dir, testConfig(), nil)
+	require.NoError(t, m.RestoreAll(ctx))
+	eng, err := m.GetEngine(DefaultCollectionID)
+	require.NoError(t, err)
+	emb, err := m.GetEmbedder(DefaultCollectionID)
+	require.NoError(t, err)
+	vec, err := emb.Embed(ctx, "durable doc")
+	require.NoError(t, err)
+	require.NoError(t, eng.Ingest(ctx, index.Document{ID: 7, Text: "durable doc", Vector: vec}))
+	require.NoError(t, m.Close())
+
+	m2 := NewManager(store, dir, testConfig(), nil)
+	require.NoError(t, m2.RestoreAll(ctx))
+	t.Cleanup(func() { m2.Close() })
+	eng2, err := m2.GetEngine(DefaultCollectionID)
+	require.NoError(t, err)
+	res, err := eng2.HybridSearch(ctx, "durable", vec, nil, 5)
+	require.NoError(t, err)
+	require.NotEmpty(t, res, "vectors must survive a restart")
+	assert.Equal(t, uint32(7), res[0].ID)
 }

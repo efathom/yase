@@ -2,6 +2,7 @@ package consensus
 
 import (
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -13,7 +14,29 @@ import (
 // join, leave, topology, alias CRUD. Runs on each cluster node;
 // write operations are forwarded to the Raft leader.
 type ClusterService struct {
-	raft *RaftNode
+	raft  *RaftNode
+	token string
+}
+
+// TokenHeader carries the cluster management shared secret.
+const TokenHeader = "X-Yase-Cluster-Token"
+
+// SetToken requires every request to present token in TokenHeader. Without a
+// token the API must only be bound to loopback (enforced by config validation).
+func (cs *ClusterService) SetToken(token string) *ClusterService {
+	cs.token = token
+	return cs
+}
+
+func (cs *ClusterService) authorize(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if cs.token != "" && subtle.ConstantTimeCompare([]byte(r.Header.Get(TokenHeader)), []byte(cs.token)) != 1 {
+			writeJSONCS(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+			return
+		}
+		r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+		next(w, r)
+	}
 }
 
 // NewClusterService creates a cluster management service.
@@ -23,13 +46,14 @@ func NewClusterService(raft *RaftNode) *ClusterService {
 
 // RegisterRoutes mounts all cluster management endpoints.
 func (cs *ClusterService) RegisterRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("POST /cluster/join", cs.handleJoin)
-	mux.HandleFunc("POST /cluster/leave", cs.handleLeave)
-	mux.HandleFunc("GET /cluster/topology", cs.handleTopology)
-	mux.HandleFunc("POST /cluster/alias", cs.handleCreateAlias)
-	mux.HandleFunc("DELETE /cluster/alias", cs.handleDeleteAlias)
-	mux.HandleFunc("POST /cluster/shard/assign", cs.handleAssignShard)
-	mux.HandleFunc("GET /cluster/status", cs.handleStatus)
+	mux.HandleFunc("POST /cluster/join", cs.authorize(cs.handleJoin))
+	mux.HandleFunc("POST /cluster/leave", cs.authorize(cs.handleLeave))
+	mux.HandleFunc("GET /cluster/topology", cs.authorize(cs.handleTopology))
+	mux.HandleFunc("POST /cluster/alias", cs.authorize(cs.handleCreateAlias))
+	mux.HandleFunc("DELETE /cluster/alias", cs.authorize(cs.handleDeleteAlias))
+	mux.HandleFunc("POST /cluster/shard/assign", cs.authorize(cs.handleAssignShard))
+	mux.HandleFunc("POST /cluster/shard/replica", cs.authorize(cs.handleAddReplica))
+	mux.HandleFunc("GET /cluster/status", cs.authorize(cs.handleStatus))
 }
 
 // ── Join: new node asks leader to add it as a Raft voter ──
@@ -340,6 +364,29 @@ func (cs *ClusterService) handleAssignShard(w http.ResponseWriter, r *http.Reque
 	writeJSONCS(w, 200, map[string]string{"status": "assigned"})
 }
 
+// ── Add replica: a node announces it serves a shard ──
+
+type addReplicaRequest struct {
+	ShardID uint32 `json:"shard_id"`
+	NodeID  string `json:"node_id"`
+}
+
+func (cs *ClusterService) handleAddReplica(w http.ResponseWriter, r *http.Request) {
+	var req addReplicaRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.NodeID == "" {
+		writeJSONCS(w, 400, map[string]string{"error": "shard_id and node_id required"})
+		return
+	}
+	if cs.redirectIfNotLeader(w) {
+		return
+	}
+	if err := cs.raft.Apply(&Command{Type: CmdAddReplica, AddReplica: &AddReplica{ShardID: req.ShardID, NodeID: req.NodeID}}, 5*time.Second); err != nil {
+		writeJSONCS(w, 500, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSONCS(w, 200, map[string]string{"status": "added"})
+}
+
 // ── Status ──
 
 func (cs *ClusterService) handleStatus(w http.ResponseWriter, _ *http.Request) {
@@ -357,16 +404,27 @@ func (cs *ClusterService) handleStatus(w http.ResponseWriter, _ *http.Request) {
 // FetchTopology calls a cluster node's /cluster/topology endpoint.
 // Used by the distributed gateway to discover shard-to-node mappings.
 func FetchTopology(ctx context.Context, clusterHTTPAddr string) (*topologyResponse, error) {
+	return FetchTopologyWithToken(ctx, clusterHTTPAddr, "")
+}
+
+// FetchTopologyWithToken is FetchTopology presenting the cluster token.
+func FetchTopologyWithToken(ctx context.Context, clusterHTTPAddr, token string) (*topologyResponse, error) {
 	client := &http.Client{Timeout: 5 * time.Second}
 	req, err := http.NewRequestWithContext(ctx, "GET", clusterHTTPAddr+"/cluster/topology", nil)
 	if err != nil {
 		return nil, err
+	}
+	if token != "" {
+		req.Header.Set(TokenHeader, token)
 	}
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("topology fetch: %w", err)
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("topology fetch: HTTP %d", resp.StatusCode)
+	}
 
 	var topo topologyResponse
 	if err := json.NewDecoder(resp.Body).Decode(&topo); err != nil {

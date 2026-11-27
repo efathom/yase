@@ -2,12 +2,16 @@ package auth
 
 import (
 	"context"
+	"crypto"
+	"crypto/ecdsa"
 	"crypto/hmac"
+	"crypto/rsa"
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"math/big"
 	"strings"
 	"time"
 )
@@ -28,12 +32,21 @@ type JWTConfig struct {
 	// multi-tenancy is in use — an empty tenant produces an unscoped context
 	// that the tenant filter cannot narrow.
 	RequireTenant bool `json:"require_tenant" yaml:"require_tenant"`
+
+	// PublicKey verifies RS256/ES256 tokens (an *rsa.PublicKey or a P-256
+	// *ecdsa.PublicKey). JWKS fetches keys from an identity provider instead.
+	PublicKey crypto.PublicKey `json:"-" yaml:"-"`
+	JWKS      *JWKSCache       `json:"-" yaml:"-"`
 }
 
-// JWTAuthenticator validates HS256 JWT tokens.
-// For production RS256/JWKS, extend with a JWKS fetcher.
+// JWTAuthenticator validates JWTs signed with HS256 (shared secret), or
+// RS256/ES256 (static public key or JWKS). Only algorithms backed by a
+// configured key are accepted, which rules out algorithm-confusion attacks
+// (e.g. an HS256 token "signed" with an RSA public key).
 type JWTAuthenticator struct {
 	secret        []byte
+	publicKey     crypto.PublicKey
+	jwks          *JWKSCache
 	issuer        string
 	audience      string
 	tenantClaim   string
@@ -54,6 +67,8 @@ func NewJWTAuthenticator(cfg JWTConfig) *JWTAuthenticator {
 	}
 	return &JWTAuthenticator{
 		secret:        []byte(cfg.Secret),
+		publicKey:     cfg.PublicKey,
+		jwks:          cfg.JWKS,
 		issuer:        cfg.Issuer,
 		audience:      cfg.Audience,
 		tenantClaim:   tenantClaim,
@@ -82,7 +97,7 @@ func audienceMatches(claim any, want string) bool {
 }
 
 // Authenticate validates a JWT token and extracts the auth context.
-func (j *JWTAuthenticator) Authenticate(_ context.Context, token string) (*AuthContext, error) {
+func (j *JWTAuthenticator) Authenticate(ctx context.Context, token string) (*AuthContext, error) {
 	parts := strings.Split(token, ".")
 	if len(parts) != 3 {
 		return nil, fmt.Errorf("invalid JWT: expected 3 parts, got %d", len(parts))
@@ -97,17 +112,10 @@ func (j *JWTAuthenticator) Authenticate(_ context.Context, token string) (*AuthC
 	if err := json.Unmarshal(headerBytes, &header); err != nil {
 		return nil, fmt.Errorf("invalid JWT header JSON: %w", err)
 	}
-	if alg, _ := header["alg"].(string); alg != "HS256" {
-		return nil, fmt.Errorf("unsupported JWT algorithm %q (only HS256 is accepted)", alg)
-	}
-
-	// Verify signature (HS256)
-	signingInput := parts[0] + "." + parts[1]
-	mac := hmac.New(sha256.New, j.secret)
-	mac.Write([]byte(signingInput))
-	expectedSig := base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
-	if subtle.ConstantTimeCompare([]byte(parts[2]), []byte(expectedSig)) != 1 {
-		return nil, fmt.Errorf("invalid JWT signature")
+	alg, _ := header["alg"].(string)
+	kid, _ := header["kid"].(string)
+	if err := j.verify(ctx, alg, kid, parts[0]+"."+parts[1], parts[2]); err != nil {
+		return nil, err
 	}
 
 	// Decode payload
@@ -180,4 +188,64 @@ func (j *JWTAuthenticator) Authenticate(_ context.Context, token string) (*AuthC
 		Roles:    roles,
 		Scopes:   scopesFromRoles(roles),
 	}, nil
+}
+
+// verify checks the signature with the key that matches alg. An algorithm is
+// accepted only when a key of the matching type is configured.
+func (j *JWTAuthenticator) verify(ctx context.Context, alg, kid, signingInput, sigB64 string) error {
+	sig, err := base64.RawURLEncoding.DecodeString(sigB64)
+	if err != nil {
+		return fmt.Errorf("invalid JWT signature encoding")
+	}
+	digest := sha256.Sum256([]byte(signingInput))
+
+	switch alg {
+	case "HS256":
+		if len(j.secret) == 0 {
+			return fmt.Errorf("unsupported JWT algorithm %q", alg)
+		}
+		mac := hmac.New(sha256.New, j.secret)
+		mac.Write([]byte(signingInput))
+		if subtle.ConstantTimeCompare(sig, mac.Sum(nil)) != 1 {
+			return fmt.Errorf("invalid JWT signature")
+		}
+		return nil
+	case "RS256", "ES256":
+		key, err := j.lookupKey(ctx, kid)
+		if err != nil {
+			return err
+		}
+		switch k := key.(type) {
+		case *rsa.PublicKey:
+			if alg != "RS256" {
+				return fmt.Errorf("JWT algorithm %q does not match RSA key", alg)
+			}
+			if rsa.VerifyPKCS1v15(k, crypto.SHA256, digest[:], sig) != nil {
+				return fmt.Errorf("invalid JWT signature")
+			}
+			return nil
+		case *ecdsa.PublicKey:
+			if alg != "ES256" || k.Curve.Params().Name != "P-256" || len(sig) != 64 {
+				return fmt.Errorf("JWT algorithm %q does not match EC key", alg)
+			}
+			r := new(big.Int).SetBytes(sig[:32])
+			s := new(big.Int).SetBytes(sig[32:])
+			if !ecdsa.Verify(k, digest[:], r, s) {
+				return fmt.Errorf("invalid JWT signature")
+			}
+			return nil
+		}
+		return fmt.Errorf("unsupported JWT key type")
+	}
+	return fmt.Errorf("unsupported JWT algorithm %q", alg)
+}
+
+func (j *JWTAuthenticator) lookupKey(ctx context.Context, kid string) (crypto.PublicKey, error) {
+	if j.jwks != nil {
+		return j.jwks.Key(ctx, kid)
+	}
+	if j.publicKey != nil {
+		return j.publicKey, nil
+	}
+	return nil, fmt.Errorf("no public key configured for asymmetric JWTs")
 }

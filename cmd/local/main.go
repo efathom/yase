@@ -14,7 +14,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/efathom/yase/internal/broker"
+	"github.com/efathom/yase/internal/app"
 	"github.com/efathom/yase/internal/gateway"
 	"github.com/efathom/yase/internal/glue"
 	"github.com/efathom/yase/pkg/audit"
@@ -72,12 +72,6 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Reranker (optional)
-	ranker := reranker.NewFromConfig(cfg.Reranker)
-	if ranker != nil {
-		slog.Info("Reranker enabled", "provider", cfg.Reranker.Provider, "model", cfg.Reranker.Model)
-	}
-
 	// Collections subsystem: each collection owns its own HybridEngine
 	// (Bluge + HNSW-IF + Arena) for physical isolation. The _default collection
 	// is auto-created and serves the legacy /search path.
@@ -98,8 +92,11 @@ func main() {
 		slog.Error("Failed to get default collection engine", "error", err)
 		os.Exit(1)
 	}
-	defaultEngine.Reranker = ranker
-	defaultEngine.RerankerCandidates = cfg.Reranker.Candidates
+	if ranker := reranker.NewFromConfig(cfg.Reranker); ranker != nil {
+		mgr.SetReranker(ranker, cfg.Reranker.Candidates)
+		slog.Info("Reranker enabled", "provider", cfg.Reranker.Provider, "model", cfg.Reranker.Model)
+	}
+	mgr.StartMaintenance(ctx, app.Maintenance(cfg.Index))
 
 	// WASM plugin engine
 	wasmEngine := pipeline.NewWasmEngine(ctx)
@@ -107,13 +104,12 @@ func main() {
 
 	// Kafka consumer → collection-aware index pipeline (routes by _collection_id).
 	pipelineHandler := glue.NewCollectionPipelineHandler(mgr, wasmEngine, 0.75)
-	daemon := glue.NewIndexingDaemon(cfg.Kafka.Brokers, cfg.Kafka.Topic, cfg.Kafka.GroupID, pipelineHandler.Handle)
-	if cfg.Kafka.DLQTopic != "" {
-		daemon.SetDLQ(broker.NewDLQWriter(cfg.Kafka.Brokers, cfg.Kafka.DLQTopic))
-	}
+	daemon := app.NewIndexingDaemon(cfg.Kafka, pipelineHandler.Handle, mgr.Checkpoint)
 
 	slog.Info("Indexer consuming from Kafka", "topic", cfg.Kafka.Topic)
+	daemonDone := make(chan struct{})
 	go func() {
+		defer close(daemonDone)
 		if err := daemon.Start(ctx); err != nil {
 			slog.Error("Indexing daemon error", "error", err)
 		}
@@ -122,8 +118,13 @@ func main() {
 	// HTTP gateway: legacy /search uses the _default engine; collections use the manager.
 	handler := gateway.NewHandler(&gateway.LocalSearcher{Engine: defaultEngine}, emb)
 	handler.WithCollectionSearcher(collection.NewSearcher(mgr))
+	if err := handler.SetTrustedProxies(cfg.Server.TrustedProxies); err != nil {
+		slog.Error("invalid server.trusted_proxies", "error", err)
+		os.Exit(1)
+	}
 	if cfg.Cache.Enabled {
-		handler.SetCache(cache.NewSearchCache(collection.DefaultCollectionID, cfg.Cache.MaxSize, cfg.Cache.TTL))
+		handler.SetCache(cache.NewSearchCache(collection.DefaultCollectionID, cfg.Cache.MaxSize, cfg.Cache.TTL).
+			SetGeneration(defaultEngine.Generation))
 	}
 	if cfg.Audit.Enabled {
 		auditLog := audit.NewLogger(cfg.Audit.Output)
@@ -156,29 +157,18 @@ func main() {
 	// Registered after SetAuthEnabled so the routes carry their scope checks.
 	collectionHandler.RegisterRoutes(mux)
 
-	if cfg.RateLimit.Enabled {
-		opts.RateLimiter = auth.NewRateLimiter(auth.RateLimitConfig{
-			Enabled:          cfg.RateLimit.Enabled,
-			DefaultSearchQPS: cfg.RateLimit.DefaultSearchQPS,
-			DefaultIngestRPS: cfg.RateLimit.DefaultIngestRPS,
-		})
+	if rl := app.RateLimiter(cfg); rl != nil {
+		opts.RateLimiter = rl
 	}
 
 	root := gateway.Chain(mux, opts)
 
 	addr := fmt.Sprintf(":%d", cfg.Server.HTTPPort)
-	srv := &http.Server{
-		Addr:              addr,
-		Handler:           root,
-		ReadTimeout:       15 * time.Second,
-		ReadHeaderTimeout: 5 * time.Second,
-		WriteTimeout:      30 * time.Second,
-		IdleTimeout:       60 * time.Second,
-	}
+	srv := app.NewHTTPServer(addr, root)
 
 	go func() {
-		slog.Info("Search gateway listening", "addr", addr)
-		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		slog.Info("Search gateway listening", "addr", addr, "tls", cfg.TLS.Enabled)
+		if err := app.ListenAndServe(srv, cfg.TLS); err != nil {
 			slog.Error("HTTP server error", "error", err)
 			os.Exit(1)
 		}
@@ -189,10 +179,12 @@ func main() {
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 	<-sigCh
 	slog.Info("Shutdown signal received")
-	cancel()
-	daemon.Close()
 	shutCtx, shutCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer shutCancel()
 	_ = srv.Shutdown(shutCtx)
+	// Drain the consumer (final checkpoint + commit); deferred mgr.Close then
+	// writes the final engine snapshots.
+	cancel()
+	<-daemonDone
 	slog.Info("Local server shut down cleanly")
 }

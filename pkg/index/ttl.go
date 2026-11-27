@@ -42,6 +42,12 @@ func (he *HybridEngine) StartTTLSweeper(ctx context.Context, cfg TTLConfig) {
 	}()
 }
 
+// SweepExpired deletes documents whose TTL has passed and returns how many
+// were removed.
+func (he *HybridEngine) SweepExpired(ctx context.Context, defaultTTL time.Duration) int {
+	return he.sweepExpired(ctx, defaultTTL)
+}
+
 func (he *HybridEngine) sweepExpired(ctx context.Context, defaultTTL time.Duration) int {
 	now := time.Now()
 	var cutoff int64
@@ -81,7 +87,7 @@ func (he *HybridEngine) sweepExpired(ctx context.Context, defaultTTL time.Durati
 		return nil
 	}
 
-	if err := he.BlugeStore.SearchAllPages(ctx, 10000, collect); err != nil {
+	if err := he.BlugeStore.ForEach(ctx, nil, false, collect); err != nil {
 		slog.Error("ttl search error", "error", err)
 		return 0
 	}

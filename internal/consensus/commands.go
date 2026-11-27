@@ -19,6 +19,9 @@ const (
 	CmdCreateCollection
 	CmdUpdateCollection
 	CmdDeleteCollection
+	// CmdAddReplica idempotently adds one node to a shard's replica set.
+	// Appended last so persisted logs keep their command numbering.
+	CmdAddReplica
 )
 
 // Command is a serializable FSM mutation. Exactly one payload field is set.
@@ -35,6 +38,13 @@ type Command struct {
 	CreateCollection *CreateCollection `json:"create_collection,omitempty"`
 	UpdateCollection *UpdateCollection `json:"update_collection,omitempty"`
 	DeleteCollection *DeleteCollection `json:"delete_collection,omitempty"`
+	AddReplica       *AddReplica       `json:"add_replica,omitempty"`
+}
+
+// AddReplica registers NodeID as a replica of ShardID.
+type AddReplica struct {
+	ShardID uint32 `json:"shard_id"`
+	NodeID  string `json:"node_id"`
 }
 
 type RegisterNode struct {

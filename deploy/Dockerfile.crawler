@@ -12,7 +12,10 @@ RUN CGO_ENABLED=1 go build -ldflags="-s -w" -o /bin/crawler ./cmd/crawler
 
 FROM alpine:3.21
 RUN apk add --no-cache ca-certificates
+RUN addgroup -S -g 10001 yase && adduser -S -D -H -u 10001 -G yase yase \
+    && mkdir -p /data/yase && chown -R 10001:10001 /data/yase
 COPY --from=builder /bin/crawler /usr/local/bin/crawler
 COPY configs/default.yaml /etc/yase/config.yaml
 
+USER 10001:10001
 ENTRYPOINT ["crawler", "-config", "/etc/yase/config.yaml"]

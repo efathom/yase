@@ -22,19 +22,301 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+type EmbedderRef struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Provider      string                 `protobuf:"bytes,1,opt,name=provider,proto3" json:"provider,omitempty"`
+	Model         string                 `protobuf:"bytes,2,opt,name=model,proto3" json:"model,omitempty"`
+	BaseUrl       string                 `protobuf:"bytes,3,opt,name=base_url,json=baseUrl,proto3" json:"base_url,omitempty"`
+	ApiKey        string                 `protobuf:"bytes,4,opt,name=api_key,json=apiKey,proto3" json:"api_key,omitempty"`
+	Dimension     int32                  `protobuf:"varint,5,opt,name=dimension,proto3" json:"dimension,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *EmbedderRef) Reset() {
+	*x = EmbedderRef{}
+	mi := &file_proto_v1_collection_proto_msgTypes[0]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *EmbedderRef) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*EmbedderRef) ProtoMessage() {}
+
+func (x *EmbedderRef) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_v1_collection_proto_msgTypes[0]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use EmbedderRef.ProtoReflect.Descriptor instead.
+func (*EmbedderRef) Descriptor() ([]byte, []int) {
+	return file_proto_v1_collection_proto_rawDescGZIP(), []int{0}
+}
+
+func (x *EmbedderRef) GetProvider() string {
+	if x != nil {
+		return x.Provider
+	}
+	return ""
+}
+
+func (x *EmbedderRef) GetModel() string {
+	if x != nil {
+		return x.Model
+	}
+	return ""
+}
+
+func (x *EmbedderRef) GetBaseUrl() string {
+	if x != nil {
+		return x.BaseUrl
+	}
+	return ""
+}
+
+func (x *EmbedderRef) GetApiKey() string {
+	if x != nil {
+		return x.ApiKey
+	}
+	return ""
+}
+
+func (x *EmbedderRef) GetDimension() int32 {
+	if x != nil {
+		return x.Dimension
+	}
+	return 0
+}
+
+type ChunkConfig struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Strategy      string                 `protobuf:"bytes,1,opt,name=strategy,proto3" json:"strategy,omitempty"`
+	Threshold     float32                `protobuf:"fixed32,2,opt,name=threshold,proto3" json:"threshold,omitempty"`
+	MaxTokens     int32                  `protobuf:"varint,3,opt,name=max_tokens,json=maxTokens,proto3" json:"max_tokens,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ChunkConfig) Reset() {
+	*x = ChunkConfig{}
+	mi := &file_proto_v1_collection_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ChunkConfig) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ChunkConfig) ProtoMessage() {}
+
+func (x *ChunkConfig) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_v1_collection_proto_msgTypes[1]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ChunkConfig.ProtoReflect.Descriptor instead.
+func (*ChunkConfig) Descriptor() ([]byte, []int) {
+	return file_proto_v1_collection_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *ChunkConfig) GetStrategy() string {
+	if x != nil {
+		return x.Strategy
+	}
+	return ""
+}
+
+func (x *ChunkConfig) GetThreshold() float32 {
+	if x != nil {
+		return x.Threshold
+	}
+	return 0
+}
+
+func (x *ChunkConfig) GetMaxTokens() int32 {
+	if x != nil {
+		return x.MaxTokens
+	}
+	return 0
+}
+
+type BindConnectorRequest struct {
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	Id             string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	ConnectorJobId string                 `protobuf:"bytes,2,opt,name=connector_job_id,json=connectorJobId,proto3" json:"connector_job_id,omitempty"`
+	CallerTenant   string                 `protobuf:"bytes,3,opt,name=caller_tenant,json=callerTenant,proto3" json:"caller_tenant,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *BindConnectorRequest) Reset() {
+	*x = BindConnectorRequest{}
+	mi := &file_proto_v1_collection_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *BindConnectorRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*BindConnectorRequest) ProtoMessage() {}
+
+func (x *BindConnectorRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_v1_collection_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use BindConnectorRequest.ProtoReflect.Descriptor instead.
+func (*BindConnectorRequest) Descriptor() ([]byte, []int) {
+	return file_proto_v1_collection_proto_rawDescGZIP(), []int{2}
+}
+
+func (x *BindConnectorRequest) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+func (x *BindConnectorRequest) GetConnectorJobId() string {
+	if x != nil {
+		return x.ConnectorJobId
+	}
+	return ""
+}
+
+func (x *BindConnectorRequest) GetCallerTenant() string {
+	if x != nil {
+		return x.CallerTenant
+	}
+	return ""
+}
+
+type CollectionStatsResponse struct {
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	Id             string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	HnswNodes      int64                  `protobuf:"varint,2,opt,name=hnsw_nodes,json=hnswNodes,proto3" json:"hnsw_nodes,omitempty"`
+	Centroids      int64                  `protobuf:"varint,3,opt,name=centroids,proto3" json:"centroids,omitempty"`
+	Leaves         int64                  `protobuf:"varint,4,opt,name=leaves,proto3" json:"leaves,omitempty"`
+	ArenaUsedBytes int64                  `protobuf:"varint,5,opt,name=arena_used_bytes,json=arenaUsedBytes,proto3" json:"arena_used_bytes,omitempty"`
+	Documents      int64                  `protobuf:"varint,6,opt,name=documents,proto3" json:"documents,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *CollectionStatsResponse) Reset() {
+	*x = CollectionStatsResponse{}
+	mi := &file_proto_v1_collection_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CollectionStatsResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CollectionStatsResponse) ProtoMessage() {}
+
+func (x *CollectionStatsResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_v1_collection_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CollectionStatsResponse.ProtoReflect.Descriptor instead.
+func (*CollectionStatsResponse) Descriptor() ([]byte, []int) {
+	return file_proto_v1_collection_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *CollectionStatsResponse) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+func (x *CollectionStatsResponse) GetHnswNodes() int64 {
+	if x != nil {
+		return x.HnswNodes
+	}
+	return 0
+}
+
+func (x *CollectionStatsResponse) GetCentroids() int64 {
+	if x != nil {
+		return x.Centroids
+	}
+	return 0
+}
+
+func (x *CollectionStatsResponse) GetLeaves() int64 {
+	if x != nil {
+		return x.Leaves
+	}
+	return 0
+}
+
+func (x *CollectionStatsResponse) GetArenaUsedBytes() int64 {
+	if x != nil {
+		return x.ArenaUsedBytes
+	}
+	return 0
+}
+
+func (x *CollectionStatsResponse) GetDocuments() int64 {
+	if x != nil {
+		return x.Documents
+	}
+	return 0
+}
+
 type CollectionConfig struct {
 	state          protoimpl.MessageState `protogen:"open.v1"`
 	ArenaSizeBytes uint64                 `protobuf:"varint,1,opt,name=arena_size_bytes,json=arenaSizeBytes,proto3" json:"arena_size_bytes,omitempty"`
 	VecDim         int32                  `protobuf:"varint,2,opt,name=vec_dim,json=vecDim,proto3" json:"vec_dim,omitempty"`
 	CentroidRate   int32                  `protobuf:"varint,3,opt,name=centroid_rate,json=centroidRate,proto3" json:"centroid_rate,omitempty"`
 	SyncSchedule   string                 `protobuf:"bytes,4,opt,name=sync_schedule,json=syncSchedule,proto3" json:"sync_schedule,omitempty"`
+	Embedder       *EmbedderRef           `protobuf:"bytes,5,opt,name=embedder,proto3" json:"embedder,omitempty"`
+	Chunking       *ChunkConfig           `protobuf:"bytes,6,opt,name=chunking,proto3" json:"chunking,omitempty"`
 	unknownFields  protoimpl.UnknownFields
 	sizeCache      protoimpl.SizeCache
 }
 
 func (x *CollectionConfig) Reset() {
 	*x = CollectionConfig{}
-	mi := &file_proto_v1_collection_proto_msgTypes[0]
+	mi := &file_proto_v1_collection_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -46,7 +328,7 @@ func (x *CollectionConfig) String() string {
 func (*CollectionConfig) ProtoMessage() {}
 
 func (x *CollectionConfig) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_v1_collection_proto_msgTypes[0]
+	mi := &file_proto_v1_collection_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -59,7 +341,7 @@ func (x *CollectionConfig) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CollectionConfig.ProtoReflect.Descriptor instead.
 func (*CollectionConfig) Descriptor() ([]byte, []int) {
-	return file_proto_v1_collection_proto_rawDescGZIP(), []int{0}
+	return file_proto_v1_collection_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *CollectionConfig) GetArenaSizeBytes() uint64 {
@@ -90,6 +372,20 @@ func (x *CollectionConfig) GetSyncSchedule() string {
 	return ""
 }
 
+func (x *CollectionConfig) GetEmbedder() *EmbedderRef {
+	if x != nil {
+		return x.Embedder
+	}
+	return nil
+}
+
+func (x *CollectionConfig) GetChunking() *ChunkConfig {
+	if x != nil {
+		return x.Chunking
+	}
+	return nil
+}
+
 type Collection struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
@@ -108,7 +404,7 @@ type Collection struct {
 
 func (x *Collection) Reset() {
 	*x = Collection{}
-	mi := &file_proto_v1_collection_proto_msgTypes[1]
+	mi := &file_proto_v1_collection_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -120,7 +416,7 @@ func (x *Collection) String() string {
 func (*Collection) ProtoMessage() {}
 
 func (x *Collection) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_v1_collection_proto_msgTypes[1]
+	mi := &file_proto_v1_collection_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -133,7 +429,7 @@ func (x *Collection) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Collection.ProtoReflect.Descriptor instead.
 func (*Collection) Descriptor() ([]byte, []int) {
-	return file_proto_v1_collection_proto_rawDescGZIP(), []int{1}
+	return file_proto_v1_collection_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *Collection) GetId() string {
@@ -219,7 +515,7 @@ type CreateCollectionRequest struct {
 
 func (x *CreateCollectionRequest) Reset() {
 	*x = CreateCollectionRequest{}
-	mi := &file_proto_v1_collection_proto_msgTypes[2]
+	mi := &file_proto_v1_collection_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -231,7 +527,7 @@ func (x *CreateCollectionRequest) String() string {
 func (*CreateCollectionRequest) ProtoMessage() {}
 
 func (x *CreateCollectionRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_v1_collection_proto_msgTypes[2]
+	mi := &file_proto_v1_collection_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -244,7 +540,7 @@ func (x *CreateCollectionRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateCollectionRequest.ProtoReflect.Descriptor instead.
 func (*CreateCollectionRequest) Descriptor() ([]byte, []int) {
-	return file_proto_v1_collection_proto_rawDescGZIP(), []int{2}
+	return file_proto_v1_collection_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *CreateCollectionRequest) GetId() string {
@@ -285,13 +581,14 @@ func (x *CreateCollectionRequest) GetConfig() *CollectionConfig {
 type GetCollectionRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	CallerTenant  string                 `protobuf:"bytes,2,opt,name=caller_tenant,json=callerTenant,proto3" json:"caller_tenant,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *GetCollectionRequest) Reset() {
 	*x = GetCollectionRequest{}
-	mi := &file_proto_v1_collection_proto_msgTypes[3]
+	mi := &file_proto_v1_collection_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -303,7 +600,7 @@ func (x *GetCollectionRequest) String() string {
 func (*GetCollectionRequest) ProtoMessage() {}
 
 func (x *GetCollectionRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_v1_collection_proto_msgTypes[3]
+	mi := &file_proto_v1_collection_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -316,12 +613,19 @@ func (x *GetCollectionRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetCollectionRequest.ProtoReflect.Descriptor instead.
 func (*GetCollectionRequest) Descriptor() ([]byte, []int) {
-	return file_proto_v1_collection_proto_rawDescGZIP(), []int{3}
+	return file_proto_v1_collection_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *GetCollectionRequest) GetId() string {
 	if x != nil {
 		return x.Id
+	}
+	return ""
+}
+
+func (x *GetCollectionRequest) GetCallerTenant() string {
+	if x != nil {
+		return x.CallerTenant
 	}
 	return ""
 }
@@ -335,7 +639,7 @@ type ListCollectionsRequest struct {
 
 func (x *ListCollectionsRequest) Reset() {
 	*x = ListCollectionsRequest{}
-	mi := &file_proto_v1_collection_proto_msgTypes[4]
+	mi := &file_proto_v1_collection_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -347,7 +651,7 @@ func (x *ListCollectionsRequest) String() string {
 func (*ListCollectionsRequest) ProtoMessage() {}
 
 func (x *ListCollectionsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_v1_collection_proto_msgTypes[4]
+	mi := &file_proto_v1_collection_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -360,7 +664,7 @@ func (x *ListCollectionsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListCollectionsRequest.ProtoReflect.Descriptor instead.
 func (*ListCollectionsRequest) Descriptor() ([]byte, []int) {
-	return file_proto_v1_collection_proto_rawDescGZIP(), []int{4}
+	return file_proto_v1_collection_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *ListCollectionsRequest) GetTenantId() string {
@@ -379,7 +683,7 @@ type ListCollectionsResponse struct {
 
 func (x *ListCollectionsResponse) Reset() {
 	*x = ListCollectionsResponse{}
-	mi := &file_proto_v1_collection_proto_msgTypes[5]
+	mi := &file_proto_v1_collection_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -391,7 +695,7 @@ func (x *ListCollectionsResponse) String() string {
 func (*ListCollectionsResponse) ProtoMessage() {}
 
 func (x *ListCollectionsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_v1_collection_proto_msgTypes[5]
+	mi := &file_proto_v1_collection_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -404,7 +708,7 @@ func (x *ListCollectionsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListCollectionsResponse.ProtoReflect.Descriptor instead.
 func (*ListCollectionsResponse) Descriptor() ([]byte, []int) {
-	return file_proto_v1_collection_proto_rawDescGZIP(), []int{5}
+	return file_proto_v1_collection_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *ListCollectionsResponse) GetCollections() []*Collection {
@@ -419,13 +723,14 @@ type UpdateCollectionRequest struct {
 	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
 	Name          string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
 	Description   string                 `protobuf:"bytes,3,opt,name=description,proto3" json:"description,omitempty"`
+	CallerTenant  string                 `protobuf:"bytes,4,opt,name=caller_tenant,json=callerTenant,proto3" json:"caller_tenant,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *UpdateCollectionRequest) Reset() {
 	*x = UpdateCollectionRequest{}
-	mi := &file_proto_v1_collection_proto_msgTypes[6]
+	mi := &file_proto_v1_collection_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -437,7 +742,7 @@ func (x *UpdateCollectionRequest) String() string {
 func (*UpdateCollectionRequest) ProtoMessage() {}
 
 func (x *UpdateCollectionRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_v1_collection_proto_msgTypes[6]
+	mi := &file_proto_v1_collection_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -450,7 +755,7 @@ func (x *UpdateCollectionRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateCollectionRequest.ProtoReflect.Descriptor instead.
 func (*UpdateCollectionRequest) Descriptor() ([]byte, []int) {
-	return file_proto_v1_collection_proto_rawDescGZIP(), []int{6}
+	return file_proto_v1_collection_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *UpdateCollectionRequest) GetId() string {
@@ -474,16 +779,24 @@ func (x *UpdateCollectionRequest) GetDescription() string {
 	return ""
 }
 
+func (x *UpdateCollectionRequest) GetCallerTenant() string {
+	if x != nil {
+		return x.CallerTenant
+	}
+	return ""
+}
+
 type DeleteCollectionRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	CallerTenant  string                 `protobuf:"bytes,2,opt,name=caller_tenant,json=callerTenant,proto3" json:"caller_tenant,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *DeleteCollectionRequest) Reset() {
 	*x = DeleteCollectionRequest{}
-	mi := &file_proto_v1_collection_proto_msgTypes[7]
+	mi := &file_proto_v1_collection_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -495,7 +808,7 @@ func (x *DeleteCollectionRequest) String() string {
 func (*DeleteCollectionRequest) ProtoMessage() {}
 
 func (x *DeleteCollectionRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_v1_collection_proto_msgTypes[7]
+	mi := &file_proto_v1_collection_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -508,12 +821,19 @@ func (x *DeleteCollectionRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteCollectionRequest.ProtoReflect.Descriptor instead.
 func (*DeleteCollectionRequest) Descriptor() ([]byte, []int) {
-	return file_proto_v1_collection_proto_rawDescGZIP(), []int{7}
+	return file_proto_v1_collection_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *DeleteCollectionRequest) GetId() string {
 	if x != nil {
 		return x.Id
+	}
+	return ""
+}
+
+func (x *DeleteCollectionRequest) GetCallerTenant() string {
+	if x != nil {
+		return x.CallerTenant
 	}
 	return ""
 }
@@ -527,7 +847,7 @@ type DeleteCollectionResponse struct {
 
 func (x *DeleteCollectionResponse) Reset() {
 	*x = DeleteCollectionResponse{}
-	mi := &file_proto_v1_collection_proto_msgTypes[8]
+	mi := &file_proto_v1_collection_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -539,7 +859,7 @@ func (x *DeleteCollectionResponse) String() string {
 func (*DeleteCollectionResponse) ProtoMessage() {}
 
 func (x *DeleteCollectionResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_v1_collection_proto_msgTypes[8]
+	mi := &file_proto_v1_collection_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -552,7 +872,7 @@ func (x *DeleteCollectionResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteCollectionResponse.ProtoReflect.Descriptor instead.
 func (*DeleteCollectionResponse) Descriptor() ([]byte, []int) {
-	return file_proto_v1_collection_proto_rawDescGZIP(), []int{8}
+	return file_proto_v1_collection_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *DeleteCollectionResponse) GetOk() bool {
@@ -571,7 +891,7 @@ type CollectionResponse struct {
 
 func (x *CollectionResponse) Reset() {
 	*x = CollectionResponse{}
-	mi := &file_proto_v1_collection_proto_msgTypes[9]
+	mi := &file_proto_v1_collection_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -583,7 +903,7 @@ func (x *CollectionResponse) String() string {
 func (*CollectionResponse) ProtoMessage() {}
 
 func (x *CollectionResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_v1_collection_proto_msgTypes[9]
+	mi := &file_proto_v1_collection_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -596,7 +916,7 @@ func (x *CollectionResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CollectionResponse.ProtoReflect.Descriptor instead.
 func (*CollectionResponse) Descriptor() ([]byte, []int) {
-	return file_proto_v1_collection_proto_rawDescGZIP(), []int{9}
+	return file_proto_v1_collection_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *CollectionResponse) GetCollection() *Collection {
@@ -619,7 +939,7 @@ type CollectionSearchRequest struct {
 
 func (x *CollectionSearchRequest) Reset() {
 	*x = CollectionSearchRequest{}
-	mi := &file_proto_v1_collection_proto_msgTypes[10]
+	mi := &file_proto_v1_collection_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -631,7 +951,7 @@ func (x *CollectionSearchRequest) String() string {
 func (*CollectionSearchRequest) ProtoMessage() {}
 
 func (x *CollectionSearchRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_v1_collection_proto_msgTypes[10]
+	mi := &file_proto_v1_collection_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -644,7 +964,7 @@ func (x *CollectionSearchRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CollectionSearchRequest.ProtoReflect.Descriptor instead.
 func (*CollectionSearchRequest) Descriptor() ([]byte, []int) {
-	return file_proto_v1_collection_proto_rawDescGZIP(), []int{10}
+	return file_proto_v1_collection_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *CollectionSearchRequest) GetCollectionIds() []string {
@@ -691,7 +1011,7 @@ type CollectionSearchResponse struct {
 
 func (x *CollectionSearchResponse) Reset() {
 	*x = CollectionSearchResponse{}
-	mi := &file_proto_v1_collection_proto_msgTypes[11]
+	mi := &file_proto_v1_collection_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -703,7 +1023,7 @@ func (x *CollectionSearchResponse) String() string {
 func (*CollectionSearchResponse) ProtoMessage() {}
 
 func (x *CollectionSearchResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_v1_collection_proto_msgTypes[11]
+	mi := &file_proto_v1_collection_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -716,7 +1036,7 @@ func (x *CollectionSearchResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CollectionSearchResponse.ProtoReflect.Descriptor instead.
 func (*CollectionSearchResponse) Descriptor() ([]byte, []int) {
-	return file_proto_v1_collection_proto_rawDescGZIP(), []int{11}
+	return file_proto_v1_collection_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *CollectionSearchResponse) GetResults() []*CollectionScoredResult {
@@ -739,7 +1059,7 @@ type CollectionScoredResult struct {
 
 func (x *CollectionScoredResult) Reset() {
 	*x = CollectionScoredResult{}
-	mi := &file_proto_v1_collection_proto_msgTypes[12]
+	mi := &file_proto_v1_collection_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -751,7 +1071,7 @@ func (x *CollectionScoredResult) String() string {
 func (*CollectionScoredResult) ProtoMessage() {}
 
 func (x *CollectionScoredResult) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_v1_collection_proto_msgTypes[12]
+	mi := &file_proto_v1_collection_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -764,7 +1084,7 @@ func (x *CollectionScoredResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CollectionScoredResult.ProtoReflect.Descriptor instead.
 func (*CollectionScoredResult) Descriptor() ([]byte, []int) {
-	return file_proto_v1_collection_proto_rawDescGZIP(), []int{12}
+	return file_proto_v1_collection_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *CollectionScoredResult) GetId() uint32 {
@@ -806,12 +1126,37 @@ var File_proto_v1_collection_proto protoreflect.FileDescriptor
 
 const file_proto_v1_collection_proto_rawDesc = "" +
 	"\n" +
-	"\x19proto/v1/collection.proto\x12\x11yase.ingestion.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"\x9f\x01\n" +
+	"\x19proto/v1/collection.proto\x12\x11yase.ingestion.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"\x91\x01\n" +
+	"\vEmbedderRef\x12\x1a\n" +
+	"\bprovider\x18\x01 \x01(\tR\bprovider\x12\x14\n" +
+	"\x05model\x18\x02 \x01(\tR\x05model\x12\x19\n" +
+	"\bbase_url\x18\x03 \x01(\tR\abaseUrl\x12\x17\n" +
+	"\aapi_key\x18\x04 \x01(\tR\x06apiKey\x12\x1c\n" +
+	"\tdimension\x18\x05 \x01(\x05R\tdimension\"f\n" +
+	"\vChunkConfig\x12\x1a\n" +
+	"\bstrategy\x18\x01 \x01(\tR\bstrategy\x12\x1c\n" +
+	"\tthreshold\x18\x02 \x01(\x02R\tthreshold\x12\x1d\n" +
+	"\n" +
+	"max_tokens\x18\x03 \x01(\x05R\tmaxTokens\"u\n" +
+	"\x14BindConnectorRequest\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\x12(\n" +
+	"\x10connector_job_id\x18\x02 \x01(\tR\x0econnectorJobId\x12#\n" +
+	"\rcaller_tenant\x18\x03 \x01(\tR\fcallerTenant\"\xc6\x01\n" +
+	"\x17CollectionStatsResponse\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\x12\x1d\n" +
+	"\n" +
+	"hnsw_nodes\x18\x02 \x01(\x03R\thnswNodes\x12\x1c\n" +
+	"\tcentroids\x18\x03 \x01(\x03R\tcentroids\x12\x16\n" +
+	"\x06leaves\x18\x04 \x01(\x03R\x06leaves\x12(\n" +
+	"\x10arena_used_bytes\x18\x05 \x01(\x03R\x0earenaUsedBytes\x12\x1c\n" +
+	"\tdocuments\x18\x06 \x01(\x03R\tdocuments\"\x97\x02\n" +
 	"\x10CollectionConfig\x12(\n" +
 	"\x10arena_size_bytes\x18\x01 \x01(\x04R\x0earenaSizeBytes\x12\x17\n" +
 	"\avec_dim\x18\x02 \x01(\x05R\x06vecDim\x12#\n" +
 	"\rcentroid_rate\x18\x03 \x01(\x05R\fcentroidRate\x12#\n" +
-	"\rsync_schedule\x18\x04 \x01(\tR\fsyncSchedule\"\xf7\x02\n" +
+	"\rsync_schedule\x18\x04 \x01(\tR\fsyncSchedule\x12:\n" +
+	"\bembedder\x18\x05 \x01(\v2\x1e.yase.ingestion.v1.EmbedderRefR\bembedder\x12:\n" +
+	"\bchunking\x18\x06 \x01(\v2\x1e.yase.ingestion.v1.ChunkConfigR\bchunking\"\xf7\x02\n" +
 	"\n" +
 	"Collection\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
@@ -834,19 +1179,22 @@ const file_proto_v1_collection_proto_rawDesc = "" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x1b\n" +
 	"\ttenant_id\x18\x03 \x01(\tR\btenantId\x12 \n" +
 	"\vdescription\x18\x04 \x01(\tR\vdescription\x12;\n" +
-	"\x06config\x18\x05 \x01(\v2#.yase.ingestion.v1.CollectionConfigR\x06config\"&\n" +
+	"\x06config\x18\x05 \x01(\v2#.yase.ingestion.v1.CollectionConfigR\x06config\"K\n" +
 	"\x14GetCollectionRequest\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\"5\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\x12#\n" +
+	"\rcaller_tenant\x18\x02 \x01(\tR\fcallerTenant\"5\n" +
 	"\x16ListCollectionsRequest\x12\x1b\n" +
 	"\ttenant_id\x18\x01 \x01(\tR\btenantId\"Z\n" +
 	"\x17ListCollectionsResponse\x12?\n" +
-	"\vcollections\x18\x01 \x03(\v2\x1d.yase.ingestion.v1.CollectionR\vcollections\"_\n" +
+	"\vcollections\x18\x01 \x03(\v2\x1d.yase.ingestion.v1.CollectionR\vcollections\"\x84\x01\n" +
 	"\x17UpdateCollectionRequest\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12 \n" +
-	"\vdescription\x18\x03 \x01(\tR\vdescription\")\n" +
+	"\vdescription\x18\x03 \x01(\tR\vdescription\x12#\n" +
+	"\rcaller_tenant\x18\x04 \x01(\tR\fcallerTenant\"N\n" +
 	"\x17DeleteCollectionRequest\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\"*\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\x12#\n" +
+	"\rcaller_tenant\x18\x02 \x01(\tR\fcallerTenant\"*\n" +
 	"\x18DeleteCollectionResponse\x12\x0e\n" +
 	"\x02ok\x18\x01 \x01(\bR\x02ok\"S\n" +
 	"\x12CollectionResponse\x12=\n" +
@@ -871,14 +1219,17 @@ const file_proto_v1_collection_proto_rawDesc = "" +
 	"\n" +
 	"bm25_score\x18\x03 \x01(\x01R\tbm25Score\x12%\n" +
 	"\x0esemantic_score\x18\x04 \x01(\x02R\rsemanticScore\x12#\n" +
-	"\rcollection_id\x18\x05 \x01(\tR\fcollectionId2\x86\x05\n" +
+	"\rcollection_id\x18\x05 \x01(\tR\fcollectionId2\xb2\a\n" +
 	"\x11CollectionService\x12e\n" +
 	"\x10CreateCollection\x12*.yase.ingestion.v1.CreateCollectionRequest\x1a%.yase.ingestion.v1.CollectionResponse\x12_\n" +
 	"\rGetCollection\x12'.yase.ingestion.v1.GetCollectionRequest\x1a%.yase.ingestion.v1.CollectionResponse\x12h\n" +
 	"\x0fListCollections\x12).yase.ingestion.v1.ListCollectionsRequest\x1a*.yase.ingestion.v1.ListCollectionsResponse\x12e\n" +
 	"\x10UpdateCollection\x12*.yase.ingestion.v1.UpdateCollectionRequest\x1a%.yase.ingestion.v1.CollectionResponse\x12k\n" +
 	"\x10DeleteCollection\x12*.yase.ingestion.v1.DeleteCollectionRequest\x1a+.yase.ingestion.v1.DeleteCollectionResponse\x12k\n" +
-	"\x10SearchCollection\x12*.yase.ingestion.v1.CollectionSearchRequest\x1a+.yase.ingestion.v1.CollectionSearchResponseB.Z,github.com/efathom/yase/proto/v1;ingestionv1b\x06proto3"
+	"\x10SearchCollection\x12*.yase.ingestion.v1.CollectionSearchRequest\x1a+.yase.ingestion.v1.CollectionSearchResponse\x12_\n" +
+	"\rBindConnector\x12'.yase.ingestion.v1.BindConnectorRequest\x1a%.yase.ingestion.v1.CollectionResponse\x12a\n" +
+	"\x0fUnbindConnector\x12'.yase.ingestion.v1.BindConnectorRequest\x1a%.yase.ingestion.v1.CollectionResponse\x12f\n" +
+	"\x0fCollectionStats\x12'.yase.ingestion.v1.GetCollectionRequest\x1a*.yase.ingestion.v1.CollectionStatsResponseB.Z,github.com/efathom/yase/proto/v1;ingestionv1b\x06proto3"
 
 var (
 	file_proto_v1_collection_proto_rawDescOnce sync.Once
@@ -892,50 +1243,62 @@ func file_proto_v1_collection_proto_rawDescGZIP() []byte {
 	return file_proto_v1_collection_proto_rawDescData
 }
 
-var file_proto_v1_collection_proto_msgTypes = make([]protoimpl.MessageInfo, 14)
+var file_proto_v1_collection_proto_msgTypes = make([]protoimpl.MessageInfo, 18)
 var file_proto_v1_collection_proto_goTypes = []any{
-	(*CollectionConfig)(nil),         // 0: yase.ingestion.v1.CollectionConfig
-	(*Collection)(nil),               // 1: yase.ingestion.v1.Collection
-	(*CreateCollectionRequest)(nil),  // 2: yase.ingestion.v1.CreateCollectionRequest
-	(*GetCollectionRequest)(nil),     // 3: yase.ingestion.v1.GetCollectionRequest
-	(*ListCollectionsRequest)(nil),   // 4: yase.ingestion.v1.ListCollectionsRequest
-	(*ListCollectionsResponse)(nil),  // 5: yase.ingestion.v1.ListCollectionsResponse
-	(*UpdateCollectionRequest)(nil),  // 6: yase.ingestion.v1.UpdateCollectionRequest
-	(*DeleteCollectionRequest)(nil),  // 7: yase.ingestion.v1.DeleteCollectionRequest
-	(*DeleteCollectionResponse)(nil), // 8: yase.ingestion.v1.DeleteCollectionResponse
-	(*CollectionResponse)(nil),       // 9: yase.ingestion.v1.CollectionResponse
-	(*CollectionSearchRequest)(nil),  // 10: yase.ingestion.v1.CollectionSearchRequest
-	(*CollectionSearchResponse)(nil), // 11: yase.ingestion.v1.CollectionSearchResponse
-	(*CollectionScoredResult)(nil),   // 12: yase.ingestion.v1.CollectionScoredResult
-	nil,                              // 13: yase.ingestion.v1.CollectionSearchRequest.FiltersEntry
-	(*timestamppb.Timestamp)(nil),    // 14: google.protobuf.Timestamp
+	(*EmbedderRef)(nil),              // 0: yase.ingestion.v1.EmbedderRef
+	(*ChunkConfig)(nil),              // 1: yase.ingestion.v1.ChunkConfig
+	(*BindConnectorRequest)(nil),     // 2: yase.ingestion.v1.BindConnectorRequest
+	(*CollectionStatsResponse)(nil),  // 3: yase.ingestion.v1.CollectionStatsResponse
+	(*CollectionConfig)(nil),         // 4: yase.ingestion.v1.CollectionConfig
+	(*Collection)(nil),               // 5: yase.ingestion.v1.Collection
+	(*CreateCollectionRequest)(nil),  // 6: yase.ingestion.v1.CreateCollectionRequest
+	(*GetCollectionRequest)(nil),     // 7: yase.ingestion.v1.GetCollectionRequest
+	(*ListCollectionsRequest)(nil),   // 8: yase.ingestion.v1.ListCollectionsRequest
+	(*ListCollectionsResponse)(nil),  // 9: yase.ingestion.v1.ListCollectionsResponse
+	(*UpdateCollectionRequest)(nil),  // 10: yase.ingestion.v1.UpdateCollectionRequest
+	(*DeleteCollectionRequest)(nil),  // 11: yase.ingestion.v1.DeleteCollectionRequest
+	(*DeleteCollectionResponse)(nil), // 12: yase.ingestion.v1.DeleteCollectionResponse
+	(*CollectionResponse)(nil),       // 13: yase.ingestion.v1.CollectionResponse
+	(*CollectionSearchRequest)(nil),  // 14: yase.ingestion.v1.CollectionSearchRequest
+	(*CollectionSearchResponse)(nil), // 15: yase.ingestion.v1.CollectionSearchResponse
+	(*CollectionScoredResult)(nil),   // 16: yase.ingestion.v1.CollectionScoredResult
+	nil,                              // 17: yase.ingestion.v1.CollectionSearchRequest.FiltersEntry
+	(*timestamppb.Timestamp)(nil),    // 18: google.protobuf.Timestamp
 }
 var file_proto_v1_collection_proto_depIdxs = []int32{
-	0,  // 0: yase.ingestion.v1.Collection.config:type_name -> yase.ingestion.v1.CollectionConfig
-	14, // 1: yase.ingestion.v1.Collection.created_at:type_name -> google.protobuf.Timestamp
-	14, // 2: yase.ingestion.v1.Collection.updated_at:type_name -> google.protobuf.Timestamp
-	0,  // 3: yase.ingestion.v1.CreateCollectionRequest.config:type_name -> yase.ingestion.v1.CollectionConfig
-	1,  // 4: yase.ingestion.v1.ListCollectionsResponse.collections:type_name -> yase.ingestion.v1.Collection
-	1,  // 5: yase.ingestion.v1.CollectionResponse.collection:type_name -> yase.ingestion.v1.Collection
-	13, // 6: yase.ingestion.v1.CollectionSearchRequest.filters:type_name -> yase.ingestion.v1.CollectionSearchRequest.FiltersEntry
-	12, // 7: yase.ingestion.v1.CollectionSearchResponse.results:type_name -> yase.ingestion.v1.CollectionScoredResult
-	2,  // 8: yase.ingestion.v1.CollectionService.CreateCollection:input_type -> yase.ingestion.v1.CreateCollectionRequest
-	3,  // 9: yase.ingestion.v1.CollectionService.GetCollection:input_type -> yase.ingestion.v1.GetCollectionRequest
-	4,  // 10: yase.ingestion.v1.CollectionService.ListCollections:input_type -> yase.ingestion.v1.ListCollectionsRequest
-	6,  // 11: yase.ingestion.v1.CollectionService.UpdateCollection:input_type -> yase.ingestion.v1.UpdateCollectionRequest
-	7,  // 12: yase.ingestion.v1.CollectionService.DeleteCollection:input_type -> yase.ingestion.v1.DeleteCollectionRequest
-	10, // 13: yase.ingestion.v1.CollectionService.SearchCollection:input_type -> yase.ingestion.v1.CollectionSearchRequest
-	9,  // 14: yase.ingestion.v1.CollectionService.CreateCollection:output_type -> yase.ingestion.v1.CollectionResponse
-	9,  // 15: yase.ingestion.v1.CollectionService.GetCollection:output_type -> yase.ingestion.v1.CollectionResponse
-	5,  // 16: yase.ingestion.v1.CollectionService.ListCollections:output_type -> yase.ingestion.v1.ListCollectionsResponse
-	9,  // 17: yase.ingestion.v1.CollectionService.UpdateCollection:output_type -> yase.ingestion.v1.CollectionResponse
-	8,  // 18: yase.ingestion.v1.CollectionService.DeleteCollection:output_type -> yase.ingestion.v1.DeleteCollectionResponse
-	11, // 19: yase.ingestion.v1.CollectionService.SearchCollection:output_type -> yase.ingestion.v1.CollectionSearchResponse
-	14, // [14:20] is the sub-list for method output_type
-	8,  // [8:14] is the sub-list for method input_type
-	8,  // [8:8] is the sub-list for extension type_name
-	8,  // [8:8] is the sub-list for extension extendee
-	0,  // [0:8] is the sub-list for field type_name
+	0,  // 0: yase.ingestion.v1.CollectionConfig.embedder:type_name -> yase.ingestion.v1.EmbedderRef
+	1,  // 1: yase.ingestion.v1.CollectionConfig.chunking:type_name -> yase.ingestion.v1.ChunkConfig
+	4,  // 2: yase.ingestion.v1.Collection.config:type_name -> yase.ingestion.v1.CollectionConfig
+	18, // 3: yase.ingestion.v1.Collection.created_at:type_name -> google.protobuf.Timestamp
+	18, // 4: yase.ingestion.v1.Collection.updated_at:type_name -> google.protobuf.Timestamp
+	4,  // 5: yase.ingestion.v1.CreateCollectionRequest.config:type_name -> yase.ingestion.v1.CollectionConfig
+	5,  // 6: yase.ingestion.v1.ListCollectionsResponse.collections:type_name -> yase.ingestion.v1.Collection
+	5,  // 7: yase.ingestion.v1.CollectionResponse.collection:type_name -> yase.ingestion.v1.Collection
+	17, // 8: yase.ingestion.v1.CollectionSearchRequest.filters:type_name -> yase.ingestion.v1.CollectionSearchRequest.FiltersEntry
+	16, // 9: yase.ingestion.v1.CollectionSearchResponse.results:type_name -> yase.ingestion.v1.CollectionScoredResult
+	6,  // 10: yase.ingestion.v1.CollectionService.CreateCollection:input_type -> yase.ingestion.v1.CreateCollectionRequest
+	7,  // 11: yase.ingestion.v1.CollectionService.GetCollection:input_type -> yase.ingestion.v1.GetCollectionRequest
+	8,  // 12: yase.ingestion.v1.CollectionService.ListCollections:input_type -> yase.ingestion.v1.ListCollectionsRequest
+	10, // 13: yase.ingestion.v1.CollectionService.UpdateCollection:input_type -> yase.ingestion.v1.UpdateCollectionRequest
+	11, // 14: yase.ingestion.v1.CollectionService.DeleteCollection:input_type -> yase.ingestion.v1.DeleteCollectionRequest
+	14, // 15: yase.ingestion.v1.CollectionService.SearchCollection:input_type -> yase.ingestion.v1.CollectionSearchRequest
+	2,  // 16: yase.ingestion.v1.CollectionService.BindConnector:input_type -> yase.ingestion.v1.BindConnectorRequest
+	2,  // 17: yase.ingestion.v1.CollectionService.UnbindConnector:input_type -> yase.ingestion.v1.BindConnectorRequest
+	7,  // 18: yase.ingestion.v1.CollectionService.CollectionStats:input_type -> yase.ingestion.v1.GetCollectionRequest
+	13, // 19: yase.ingestion.v1.CollectionService.CreateCollection:output_type -> yase.ingestion.v1.CollectionResponse
+	13, // 20: yase.ingestion.v1.CollectionService.GetCollection:output_type -> yase.ingestion.v1.CollectionResponse
+	9,  // 21: yase.ingestion.v1.CollectionService.ListCollections:output_type -> yase.ingestion.v1.ListCollectionsResponse
+	13, // 22: yase.ingestion.v1.CollectionService.UpdateCollection:output_type -> yase.ingestion.v1.CollectionResponse
+	12, // 23: yase.ingestion.v1.CollectionService.DeleteCollection:output_type -> yase.ingestion.v1.DeleteCollectionResponse
+	15, // 24: yase.ingestion.v1.CollectionService.SearchCollection:output_type -> yase.ingestion.v1.CollectionSearchResponse
+	13, // 25: yase.ingestion.v1.CollectionService.BindConnector:output_type -> yase.ingestion.v1.CollectionResponse
+	13, // 26: yase.ingestion.v1.CollectionService.UnbindConnector:output_type -> yase.ingestion.v1.CollectionResponse
+	3,  // 27: yase.ingestion.v1.CollectionService.CollectionStats:output_type -> yase.ingestion.v1.CollectionStatsResponse
+	19, // [19:28] is the sub-list for method output_type
+	10, // [10:19] is the sub-list for method input_type
+	10, // [10:10] is the sub-list for extension type_name
+	10, // [10:10] is the sub-list for extension extendee
+	0,  // [0:10] is the sub-list for field type_name
 }
 
 func init() { file_proto_v1_collection_proto_init() }
@@ -949,7 +1312,7 @@ func file_proto_v1_collection_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_proto_v1_collection_proto_rawDesc), len(file_proto_v1_collection_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   14,
+			NumMessages:   18,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

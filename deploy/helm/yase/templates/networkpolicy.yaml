@@ -1,0 +1,28 @@
+{{- if .Values.networkPolicy.enabled }}
+# The indexer owns all index data and trusts its gRPC callers to act for a
+# tenant; only gateway pods may reach it.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ .Release.Name }}-indexer
+spec:
+  podSelector:
+    matchLabels:
+      app: yase
+      component: indexer
+  policyTypes: ["Ingress"]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: yase
+              component: gateway
+      ports:
+        - port: {{ .Values.indexer.port }}
+          protocol: TCP
+    - ports: # probes and metrics scraping
+        - port: {{ .Values.indexer.healthPort }}
+          protocol: TCP
+        - port: {{ .Values.metrics.port }}
+          protocol: TCP
+{{- end }}

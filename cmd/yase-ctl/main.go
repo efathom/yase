@@ -20,6 +20,9 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
+
+	"github.com/efathom/yase/internal/consensus"
 )
 
 func main() {
@@ -202,34 +205,44 @@ func handleNode(addr string, args []string) error {
 
 // ── HTTP helpers ──
 
-func doGet(url string) error {
-	resp, err := http.Get(url)
+// clusterToken is sent with every request when YASE_CLUSTER_JOIN_TOKEN is set.
+var clusterToken = os.Getenv("YASE_CLUSTER_JOIN_TOKEN")
+
+var httpClient = &http.Client{Timeout: 30 * time.Second}
+
+func do(method, url string, body any) error {
+	var rdr io.Reader
+	if body != nil {
+		data, err := json.Marshal(body)
+		if err != nil {
+			return err
+		}
+		rdr = bytes.NewReader(data)
+	}
+	req, err := http.NewRequest(method, url, rdr)
+	if err != nil {
+		return err
+	}
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	if clusterToken != "" {
+		req.Header.Set(consensus.TokenHeader, clusterToken)
+	}
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return err
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusUnauthorized {
+		return fmt.Errorf("unauthorized: set YASE_CLUSTER_JOIN_TOKEN")
+	}
 	return printJSON(resp.Body)
 }
 
-func doPost(url string, body any) error {
-	data, _ := json.Marshal(body)
-	resp, err := http.Post(url, "application/json", bytes.NewReader(data))
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	return printJSON(resp.Body)
-}
-
-func doDelete(url string) error {
-	req, _ := http.NewRequest("DELETE", url, nil)
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	return printJSON(resp.Body)
-}
+func doGet(url string) error            { return do(http.MethodGet, url, nil) }
+func doPost(url string, body any) error { return do(http.MethodPost, url, body) }
+func doDelete(url string) error         { return do(http.MethodDelete, url, nil) }
 
 func printJSON(r io.Reader) error {
 	data, _ := io.ReadAll(r)
